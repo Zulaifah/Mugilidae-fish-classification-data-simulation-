@@ -1,6 +1,6 @@
 # ===============================
-# STREAMLIT APP - MUGILIDAE FISH CLASSIFIER (IMPROVED)
-# Better prediction accuracy with optimized models
+# STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
+# WITH USER GUIDANCE & ACCURATE PREDICTION
 # ===============================
 
 import streamlit as st
@@ -17,7 +17,6 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from scipy import stats
-from imblearn.over_sampling import SMOTE
 
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
 
@@ -183,29 +182,31 @@ if uploaded_file is not None:
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
     # ===============================
-    # DATA SIMULATION
+    # DATA SIMULATION (BALANCED)
     # ===============================
     
-    st.header("📊 Step 2: Data Simulation")
+    st.header("📊 Step 2: Data Simulation (Balanced)")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         target_samples = st.slider(
             "Target samples per species",
-            min_value=50, max_value=500, value=200, step=50,
-            help="Number of samples (real + simulated) per species"
+            min_value=100, max_value=500, value=250, step=50,
+            help="HIGHER = More balanced data, better accuracy"
         )
     with col2:
         noise_level = st.slider(
             "Noise level (%)",
-            min_value=0, max_value=20, value=5, step=1,
-            help="Amount of random noise added to simulated data"
+            min_value=0, max_value=20, value=8, step=1,
+            help="5-10% is realistic"
         )
-    with col3:
-        use_smote = st.checkbox("Use SMOTE balancing", value=True, help="Additional balancing for minority classes")
+    
+    # Show warning if target too low
+    if target_samples < 150:
+        st.warning("⚠️ Low target samples may cause biased predictions. Recommend 200-300.")
     
     if st.button("🔄 Generate Simulated Data", type="primary"):
-        with st.spinner("Generating simulated data..."):
+        with st.spinner("Generating balanced simulated data..."):
             # Calculate statistics per species
             species_stats = {}
             for species in species_names:
@@ -217,7 +218,7 @@ if uploaded_file is not None:
                     'count': len(species_data)
                 }
             
-            # Generate simulated data
+            # Generate simulated data - BALANCED
             simulated_data = []
             for species in species_names:
                 stats_data = species_stats[species]
@@ -248,54 +249,34 @@ if uploaded_file is not None:
             
             st.session_state['final_df'] = final_df
             st.session_state['feature_names'] = feature_names
-            st.session_state['use_smote'] = use_smote
             
             # Show summary
             st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
             
-            # Display counts
+            # Display counts - show if balanced
             count_data = []
+            max_count = 0
             for species in species_names:
-                real_count = len(real_df[real_df['Species'] == species])
-                sim_count = len(final_df[final_df['Species'] == species]) - real_count
+                total_count = len(final_df[final_df['Species'] == species])
+                max_count = max(max_count, total_count)
                 count_data.append({
                     'Species': species,
-                    'Real': real_count,
-                    'Simulated': sim_count,
-                    'Total': real_count + sim_count
+                    'Real': len(real_df[real_df['Species'] == species]),
+                    'Simulated': total_count - len(real_df[real_df['Species'] == species]),
+                    'Total': total_count
                 })
             
             st.dataframe(pd.DataFrame(count_data), use_container_width=True)
             
-            # Show sample comparison
-            st.subheader("Real vs Simulated Distribution (Sample)")
-            fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-            
-            # Plot ND2_Total distribution
-            for species in species_names[:3]:  # First 3 species
-                real_vals = real_df[real_df['Species'] == species]['ND2_Total'].values
-                sim_vals = final_df[final_df['Species'] == species]['ND2_Total'].values[:len(real_vals)]
-                axes[0].hist(real_vals, alpha=0.5, label=f'{species} (Real)', bins=10)
-                axes[0].hist(sim_vals, alpha=0.5, label=f'{species} (Sim)', bins=10, linestyle='--')
-            axes[0].set_title('ND2_Total Distribution')
-            axes[0].legend()
-            axes[0].grid(True, alpha=0.3)
-            
-            # Plot SL distribution
-            for species in species_names[:3]:
-                real_vals = real_df[real_df['Species'] == species]['SL'].values
-                sim_vals = final_df[final_df['Species'] == species]['SL'].values[:len(real_vals)]
-                axes[1].hist(real_vals, alpha=0.5, label=f'{species} (Real)', bins=10)
-                axes[1].hist(sim_vals, alpha=0.5, label=f'{species} (Sim)', bins=10, linestyle='--')
-            axes[1].set_title('SL Distribution')
-            axes[1].legend()
-            axes[1].grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            st.pyplot(fig)
+            # Check if balanced
+            counts = [c['Total'] for c in count_data]
+            if max(counts) - min(counts) < 50:
+                st.success("✅ Dataset is well-balanced! This will improve prediction accuracy.")
+            else:
+                st.warning("⚠️ Dataset is not perfectly balanced. Consider increasing target samples.")
     
     # ===============================
-    # TRAIN MODELS (IMPROVED)
+    # TRAIN MODELS (WITH BALANCED DATA)
     # ===============================
     
     if 'final_df' in st.session_state:
@@ -303,7 +284,6 @@ if uploaded_file is not None:
         
         final_df = st.session_state['final_df']
         feature_names = st.session_state['feature_names']
-        use_smote = st.session_state.get('use_smote', True)
         
         # Prepare data
         X = final_df[feature_names].values
@@ -315,12 +295,7 @@ if uploaded_file is not None:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
-        # Apply SMOTE if selected
-        if use_smote:
-            smote = SMOTE(random_state=42)
-            X_scaled, y_encoded = smote.fit_resample(X_scaled, y_encoded)
-            st.info(f"✅ SMOTE applied: {len(X_scaled)} balanced samples")
-        
+        # Use stratified split to preserve class distribution
         X_train, X_test, y_train, y_test = train_test_split(
             X_scaled, y_encoded, test_size=0.20, random_state=42, stratify=y_encoded
         )
@@ -331,13 +306,11 @@ if uploaded_file is not None:
         with col2:
             st.metric("Test Samples", len(X_test))
         
-        # Advanced training options
-        with st.expander("⚙️ Advanced Training Settings"):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                n_iterations = st.slider("Optimization Iterations", 20, 100, 50, 10)
-            with col_b:
-                n_population = st.slider("Population Size", 10, 50, 20, 5)
+        # Show class distribution in training set
+        st.caption("Training set class distribution:")
+        train_counts = pd.Series(y_train).value_counts().sort_index()
+        for i, species in enumerate(label_encoder.classes_):
+            st.caption(f"  {species}: {train_counts[i]} samples")
         
         if st.button("🚀 Train All Models", type="primary"):
             
@@ -346,17 +319,16 @@ if uploaded_file is not None:
             status_text = st.empty()
             
             # 1. Standalone ANN with Grid Search
-            status_text.text("Training Standalone ANN with Grid Search...")
+            status_text.text("Training Standalone ANN...")
             start = time.time()
             
-            # Grid search for best ANN parameters
             param_grid = {
-                'hidden_layer_sizes': [(8,4), (10,5), (12,6), (15,8)],
-                'alpha': [0.0001, 0.001, 0.01],
-                'learning_rate_init': [0.0005, 0.001, 0.005]
+                'hidden_layer_sizes': [(8,4), (10,5), (12,6), (15,8), (20,10)],
+                'alpha': [0.0001, 0.001, 0.01, 0.05],
+                'learning_rate_init': [0.0005, 0.001, 0.005, 0.01]
             }
             grid_search = GridSearchCV(
-                MLPClassifier(max_iter=500, random_state=42),
+                MLPClassifier(max_iter=500, random_state=42, early_stopping=True),
                 param_grid, cv=3, scoring='accuracy', n_jobs=-1
             )
             grid_search.fit(X_train, y_train)
@@ -371,17 +343,17 @@ if uploaded_file is not None:
             })
             progress_bar.progress(25)
             
-            # 2. ANN-PSO (Enhanced)
-            status_text.text("Training ANN-PSO (Enhanced)...")
+            # 2. ANN-PSO (More iterations for better search)
+            status_text.text("Training ANN-PSO (Optimizing for accuracy)...")
             start = time.time()
             best_pso_acc = 0
             best_pso_params = None
-            for i in range(n_iterations):
-                h1 = np.random.randint(6, 25)
-                h2 = np.random.randint(3, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
+            for i in range(60):  # More iterations
+                h1 = np.random.randint(6, 30)
+                h2 = np.random.randint(3, 18)
+                alpha = np.random.uniform(0.0001, 0.05)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42, early_stopping=True)
                 scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
                 mean_score = scores.mean()
                 if mean_score > best_pso_acc:
@@ -407,17 +379,17 @@ if uploaded_file is not None:
             })
             progress_bar.progress(50)
             
-            # 3. ANN-GA (Enhanced)
-            status_text.text("Training ANN-GA (Enhanced)...")
+            # 3. ANN-GA
+            status_text.text("Training ANN-GA...")
             start = time.time()
             best_ga_acc = 0
             best_ga_params = None
-            for i in range(n_iterations):
-                h1 = np.random.randint(6, 25)
-                h2 = np.random.randint(3, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
+            for i in range(60):
+                h1 = np.random.randint(6, 30)
+                h2 = np.random.randint(3, 18)
+                alpha = np.random.uniform(0.0001, 0.05)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42, early_stopping=True)
                 scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
                 mean_score = scores.mean()
                 if mean_score > best_ga_acc:
@@ -443,17 +415,17 @@ if uploaded_file is not None:
             })
             progress_bar.progress(75)
             
-            # 4. ANN-GWO (Enhanced)
-            status_text.text("Training ANN-GWO (Enhanced)...")
+            # 4. ANN-GWO
+            status_text.text("Training ANN-GWO...")
             start = time.time()
             best_gwo_acc = 0
             best_gwo_params = None
-            for i in range(n_iterations):
-                h1 = np.random.randint(6, 25)
-                h2 = np.random.randint(3, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
+            for i in range(60):
+                h1 = np.random.randint(6, 30)
+                h2 = np.random.randint(3, 18)
+                alpha = np.random.uniform(0.0001, 0.05)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=400, random_state=42, early_stopping=True)
                 scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
                 mean_score = scores.mean()
                 if mean_score > best_gwo_acc:
@@ -493,8 +465,8 @@ if uploaded_file is not None:
             
             # Show classification report
             st.subheader("📋 Classification Report (Best Model)")
-            best_model_idx = np.argmax([r['Accuracy'] for r in results])
-            best_model_name = results[best_model_idx]['Method']
+            best_idx = np.argmax([r['Accuracy'] for r in results])
+            best_model_name = results[best_idx]['Method']
             
             if best_model_name == 'ANN (Baseline)':
                 best_model = ann_model
@@ -559,7 +531,7 @@ if uploaded_file is not None:
             st.pyplot(fig)
     
     # ===============================
-    # PREDICTION (IMPROVED)
+    # PREDICTION WITH GUIDANCE
     # ===============================
     
     if 'ann_model' in st.session_state:
@@ -571,156 +543,159 @@ if uploaded_file is not None:
         scaler = st.session_state['scaler']
         label_encoder = st.session_state['label_encoder']
         
-        # Reference values for guidance
-        with st.expander("📖 Reference Values for Each Species"):
+        # SPECIES REFERENCE TABLE (FOR USER GUIDANCE)
+        with st.expander("📖 SPECIES REFERENCE TABLE - Use these values for accurate prediction", expanded=True):
             st.markdown("""
-            | Species | ND1_Total | ND2_Total | NP | NC | Typical SL |
-            |---------|-----------|-----------|-----|-----|-------------|
-            | **Planiliza subviridis** | 4 | 6 | 12-15 | 12-15 | 250-350 mm |
-            | **Moolgarda seheli** | 4 | 7-8 | 14-17 | 14-17 | 120-180 mm |
-            | **Osteomugil perusii** | 4 | 6-7 | 12-15 | 12-15 | 120-180 mm |
-            | **Moolgarda tade** | 4 | 8 | 15-17 | 13-19 | 250-350 mm |
-            | **Ellochelon vaigiensis** | 4 | 5-8 | 10-16 | 11-16 | 120-180 mm |
+            | Feature | Planiliza subviridis | Moolgarda seheli | Osteomugil perusii | Moolgarda tade | Ellochelon vaigiensis |
+      |---------|---------------------|------------------|---------------------|----------------|------------------------|
+      | **ND1_Total** | 4 | 4 | 4 | 4 | 4 |
+      | **ND2_Total** | 6 | 7-8 | 6-7 | 8 | 5-8 |
+      | **NP** | 12-15 | 14-17 | 12-15 | 15-17 | 10-16 |
+      | **NC** | 12-15 | 14-17 | 12-15 | 13-19 | 11-16 |
+      | **NV_Total** | 6 | 6 | 6 | 6 | 6 |
+      | **NA_Total** | 9-11 | 9-11 | 9-11 | 9-11 | 9-11 |
+      | **SL (mm)** | 250-350 | 120-180 | 120-180 | 250-350 | 120-180 |
             """)
         
-        # Create input form
+        # GUIDANCE SECTION
+        st.info("""
+        💡 **Tips for Accurate Prediction:**
+        1. Use the reference table above as a guide
+        2. For ND2_Total, use the typical values shown
+        3. For SL (Standard Length), use the typical range
+        4. If you have a specific fish in mind, match its measurements to the reference table
+        """)
+        
+        # QUICK SELECT BUTTONS
+        st.subheader("Quick Select - Test with Reference Values")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        def set_reference_values(species_name):
+            if species_name == "Planiliza subviridis":
+                return (4, 6, 14, 14, 6, 10, 300, 40, 45, 40, 80, 70, 200, 200, 200)
+            elif species_name == "Moolgarda seheli":
+                return (4, 7, 15, 15, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
+            elif species_name == "Osteomugil perusii":
+                return (4, 6, 14, 14, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
+            elif species_name == "Moolgarda tade":
+                return (4, 8, 16, 16, 6, 10, 300, 50, 60, 50, 80, 70, 200, 200, 200)
+            else:  # Ellochelon vaigiensis
+                return (4, 6, 13, 13, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
+        
+        if col1.button("📌 Planiliza", help="Set reference values for Planiliza subviridis"):
+            st.session_state['ref_vals'] = set_reference_values("Planiliza subviridis")
+        if col2.button("📌 Moolgarda seheli", help="Set reference values for Moolgarda seheli"):
+            st.session_state['ref_vals'] = set_reference_values("Moolgarda seheli")
+        if col3.button("📌 Osteomugil", help="Set reference values for Osteomugil perusii"):
+            st.session_state['ref_vals'] = set_reference_values("Osteomugil perusii")
+        if col4.button("📌 Moolgarda tade", help="Set reference values for Moolgarda tade"):
+            st.session_state['ref_vals'] = set_reference_values("Moolgarda tade")
+        if col5.button("📌 Ellochelon", help="Set reference values for Ellochelon vaigiensis"):
+            st.session_state['ref_vals'] = set_reference_values("Ellochelon vaigiensis")
+        
+        # Get default values from session state or use defaults
+        if 'ref_vals' in st.session_state:
+            nd1_def, nd2_def, np_def, nc_def, nv_def, na_def, sl_def, pl_def, bh_def, hl_def, head_def, ant_def, mid_def, post_def, tail_def = st.session_state['ref_vals']
+        else:
+            nd1_def, nd2_def, np_def, nc_def, nv_def, na_def, sl_def, pl_def, bh_def, hl_def, head_def, ant_def, mid_def, post_def, tail_def = (4, 6, 14, 14, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
+        
+        # Input form
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("Meristic Features")
-            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0, help="Usually 4 for Mugilidae")
-            nd2 = st.number_input("ND2_Total", value=6.0, step=1.0, help="Usually 6-9 for Mugilidae")
-            np_val = st.number_input("NP", value=14.0, step=1.0, help="Pectoral fin rays")
-            nc = st.number_input("NC", value=14.0, step=1.0, help="Caudal fin rays")
-            nv = st.number_input("NV_Total", value=6.0, step=1.0, help="Usually 6")
-            na = st.number_input("NA_Total", value=10.0, step=1.0, help="Usually 9-11")
+            nd1 = st.number_input("ND1_Total", value=nd1_def, step=1.0, help="Usually 4 for all Mugilidae")
+            nd2 = st.number_input("ND2_Total", value=nd2_def, step=1.0, help="Key differentiator between species")
+            np_val = st.number_input("NP", value=np_def, step=1.0, help="Pectoral fin rays")
+            nc = st.number_input("NC", value=nc_def, step=1.0, help="Caudal fin rays")
+            nv = st.number_input("NV_Total", value=nv_def, step=1.0, help="Usually 6")
+            na = st.number_input("NA_Total", value=na_def, step=1.0, help="Usually 9-11")
         
         with col2:
             st.subheader("Morphometric Features (mm)")
-            sl = st.number_input("SL", value=150.0, step=10.0, help="Standard length")
-            pl = st.number_input("PL", value=35.0, step=5.0, help="Pectoral fin length")
-            bh = st.number_input("BH", value=40.0, step=5.0, help="Body height")
-            hl = st.number_input("HL", value=35.0, step=5.0, help="Head length")
+            sl = st.number_input("SL", value=sl_def, step=10.0, help="Standard length - Key differentiator")
+            pl = st.number_input("PL", value=pl_def, step=5.0, help="Pectoral fin length")
+            bh = st.number_input("BH", value=bh_def, step=5.0, help="Body height")
+            hl = st.number_input("HL", value=hl_def, step=5.0, help="Head length")
             
             st.subheader("Truss Features (mm)")
-            head = st.number_input("Head_Truss", value=80.0, step=10.0)
-            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
-            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
-            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
-            tail = st.number_input("Tail_Truss", value=200.0, step=20.0)
+            head = st.number_input("Head_Truss", value=head_def, step=10.0)
+            ant = st.number_input("Anterior_Truss", value=ant_def, step=10.0)
+            mid = st.number_input("Mid_Truss", value=mid_def, step=20.0)
+            post = st.number_input("Posterior_Truss", value=post_def, step=20.0)
+            tail = st.number_input("Tail_Truss", value=tail_def, step=20.0)
         
-        # Choose model for prediction
-        model_choice = st.selectbox(
-            "Select Model for Prediction",
-            ["ANN (Baseline)", "ANN-PSO", "ANN-GA", "ANN-GWO", "Ensemble (Majority Voting)"]
-        )
-        
-        if st.button("🔍 Predict Species", type="primary"):
-            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl,
-                                  head, ant, mid, post, tail]])
-            features_scaled = scaler.transform(features)
-            
-            # Get probabilities from all models for confidence
-            all_probas = []
-            
-            if model_choice == "ANN (Baseline)":
-                model = st.session_state['ann_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
+        # Model selection with recommendation
+        col_m1, col_m2 = st.columns([2, 1])
+        with col_m1:
+            model_choice = st.selectbox(
+                "Select Model for Prediction",
+                ["ANN-PSO (Recommended)", "ANN (Baseline)", "ANN-GA", "ANN-GWO", "Ensemble (Majority Voting)"]
+            )
+        with col_m2:
+            st.markdown("")
+            st.markdown("")
+            if st.button("🔍 Predict Species", type="primary"):
+                features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl,
+                                      head, ant, mid, post, tail]])
+                features_scaled = scaler.transform(features)
                 
-            elif model_choice == "ANN-PSO":
-                model = st.session_state['pso_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
+                if model_choice == "ANN (Baseline)":
+                    model = st.session_state['ann_model']
+                    pred = model.predict(features_scaled)[0]
+                    species = label_encoder.inverse_transform([pred])[0]
+                    proba = model.predict_proba(features_scaled)[0]
+                    
+                elif model_choice == "ANN-PSO (Recommended)":
+                    model = st.session_state['pso_model']
+                    pred = model.predict(features_scaled)[0]
+                    species = label_encoder.inverse_transform([pred])[0]
+                    proba = model.predict_proba(features_scaled)[0]
+                    
+                elif model_choice == "ANN-GA":
+                    model = st.session_state['ga_model']
+                    pred = model.predict(features_scaled)[0]
+                    species = label_encoder.inverse_transform([pred])[0]
+                    proba = model.predict_proba(features_scaled)[0]
+                    
+                elif model_choice == "ANN-GWO":
+                    model = st.session_state['gwo_model']
+                    pred = model.predict(features_scaled)[0]
+                    species = label_encoder.inverse_transform([pred])[0]
+                    proba = model.predict_proba(features_scaled)[0]
+                    
+                else:  # Ensemble
+                    models = [
+                        st.session_state['ann_model'],
+                        st.session_state['pso_model'],
+                        st.session_state['ga_model'],
+                        st.session_state['gwo_model']
+                    ]
+                    predictions = [m.predict(features_scaled)[0] for m in models]
+                    all_probas = [m.predict_proba(features_scaled)[0] for m in models]
+                    pred = max(set(predictions), key=predictions.count)
+                    species = label_encoder.inverse_transform([pred])[0]
+                    proba = np.mean(all_probas, axis=0)
                 
-            elif model_choice == "ANN-GA":
-                model = st.session_state['ga_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
+                st.success(f"### 🎯 Predicted Species: **{species}**")
                 
-            elif model_choice == "ANN-GWO":
-                model = st.session_state['gwo_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
+                confidence = max(proba) * 100
+                st.progress(int(confidence))
+                st.caption(f"Confidence: {confidence:.1f}%")
                 
-            else:  # Ensemble
-                models = [
-                    st.session_state['ann_model'],
-                    st.session_state['pso_model'],
-                    st.session_state['ga_model'],
-                    st.session_state['gwo_model']
-                ]
-                predictions = [m.predict(features_scaled)[0] for m in models]
-                all_probas = [m.predict_proba(features_scaled)[0] for m in models]
-                pred = max(set(predictions), key=predictions.count)
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = np.mean(all_probas, axis=0)
-            
-            st.success(f"### 🎯 Predicted Species: **{species}**")
-            
-            # Show confidence
-            confidence = max(proba) * 100
-            st.progress(int(confidence))
-            st.caption(f"Confidence: {confidence:.1f}%")
-            
-            # Show all probabilities
-            st.subheader("Species Probabilities")
-            prob_df = pd.DataFrame({
-                'Species': label_encoder.classes_,
-                'Probability': proba
-            }).sort_values('Probability', ascending=False)
-            
-            st.bar_chart(prob_df.set_index('Species'))
-            
-            # Show ensemble agreement if applicable
-            if model_choice == "Ensemble (Majority Voting)":
-                st.caption("Ensemble prediction combines all 4 models for more accurate results")
-    
-else:
-    st.info("👈 Please upload your Excel file to begin")
-    
-    # Show instructions
-    with st.expander("📖 How to Use This App"):
-        st.markdown("""
-        ### Step-by-Step Guide:
-        
-        1. **Upload** your Excel file (FYP Mugilidae Dataset(CLEANED).xlsx)
-        
-        2. **Configure Simulation:**
-           - Target samples per species (recommended: 200)
-           - Noise level (recommended: 5%)
-           - Enable SMOTE for additional balancing
-        
-        3. **Generate** simulated data
-        
-        4. **Train** all 4 models (ANN, ANN-PSO, ANN-GA, ANN-GWO)
-        
-        5. **Compare** results in tables and charts
-        
-        6. **Make predictions** using any model or ensemble voting
-        
-        ### Tips for Better Accuracy:
-        - Use more simulated samples (200-300 per species)
-        - Keep noise level at 5-10%
-        - Enable SMOTE balancing
-        - Use Ensemble model for predictions
-        """)
-
-# ===============================
-# FOOTER
-# ===============================
-
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: gray;'>
-    <p>🐟 Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO</p>
-    <p>FYP Project | Universiti Malaysia Terengganu</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+                # Show all probabilities
+                st.subheader("Species Probabilities")
+                prob_df = pd.DataFrame({
+                    'Species': label_encoder.classes_,
+                    'Probability': proba
+                }).sort_values('Probability', ascending=False)
+                
+                st.bar_chart(prob_df.set_index('Species'))
+                
+                # Show which features most influenced the prediction
+                st.subheader("Key Features for This Prediction")
+                
+                # Simple feature comparison with reference values
+                species_ranges = {
+                    "Planiliza subviridis": {"ND2": (5.5, 6.5), "SL": (250, 350)},
+                    "Moolgarda seheli": {"ND2": (6.5, 8.5), "SL":
