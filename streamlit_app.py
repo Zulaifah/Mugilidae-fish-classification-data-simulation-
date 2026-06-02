@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# WITH USER GUIDANCE & ACCURATE PREDICTION
+# WITH RANGE VALIDATION & ACCURATE PREDICTION
 # ===============================
 
 import streamlit as st
@@ -19,6 +19,181 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 from scipy import stats
 
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
+
+# ===============================
+# SPECIES RANGE DATABASE
+# ===============================
+
+SPECIES_RANGES = {
+    "Planiliza subviridis": {
+        "ND1_Total": (4, 4),
+        "ND2_Total": (6, 9),
+        "NP": (10, 15),
+        "NC": (11, 16),
+        "NV_Total": (5, 6),
+        "NA_Total": (8, 11),
+        "SL": (80.44, 622.03),
+        "PL": (14.59, 210.91),
+        "BH": (19.57, 227.04),
+        "HL": (21.29, 217.10),
+        "Head_Truss": (3.62, 46.87),
+        "Anterior_Truss": (12.81, 47.42),
+        "Mid_Truss": (17.49, 87.04),
+        "Posterior_Truss": (17.34, 87.73),
+        "Tail_Truss": (8.55, 67.56)
+    },
+    "Moolgarda seheli": {
+        "ND1_Total": (4, 4),
+        "ND2_Total": (6, 9),
+        "NP": (10, 16),
+        "NC": (11, 17),
+        "NV_Total": (5, 7),
+        "NA_Total": (9, 12),
+        "SL": (79.52, 300.00),
+        "PL": (21.53, 67.88),
+        "BH": (23.79, 68.95),
+        "HL": (20.79, 75.44),
+        "Head_Truss": (3.58, 75.55),
+        "Anterior_Truss": (13.30, 66.92),
+        "Mid_Truss": (15.56, 117.48),
+        "Posterior_Truss": (20.44, 127.25),
+        "Tail_Truss": (10.51, 96.42)
+    },
+    "Osteomugil perusii": {
+        "ND1_Total": (4, 4),
+        "ND2_Total": (6, 9),
+        "NP": (10, 16),
+        "NC": (10, 17),
+        "NV_Total": (5, 6),
+        "NA_Total": (9, 11),
+        "SL": (11.47, 177.00),
+        "PL": (10.86, 160.09),
+        "BH": (12.04, 167.54),
+        "HL": (14.57, 162.09),
+        "Head_Truss": (3.63, 76.33),
+        "Anterior_Truss": (10.00, 43.39),
+        "Mid_Truss": (10.62, 142.16),
+        "Posterior_Truss": (11.47, 454.04),
+        "Tail_Truss": (6.31, 59.39)
+    },
+    "Moolgarda tade": {
+        "ND1_Total": (4, 4),
+        "ND2_Total": (8, 9),
+        "NP": (15, 17),
+        "NC": (13, 19),
+        "NV_Total": (6, 9),
+        "NA_Total": (9, 12),
+        "SL": (74.54, 372.13),
+        "PL": (24.25, 75.83),
+        "BH": (30.65, 150.76),
+        "HL": (27.86, 230.02),
+        "Head_Truss": (5.09, 87.18),
+        "Anterior_Truss": (14.82, 80.00),
+        "Mid_Truss": (24.15, 131.86),
+        "Posterior_Truss": (23.35, 149.08),
+        "Tail_Truss": (13.88, 108.36)
+    },
+    "Ellochelon vaigiensis": {
+        "ND1_Total": (4, 4),
+        "ND2_Total": (6, 9),
+        "NP": (10, 16),
+        "NC": (11, 16),
+        "NV_Total": (6, 7),
+        "NA_Total": (7, 11),
+        "SL": (49.73, 363.50),
+        "PL": (0, 53.86),
+        "BH": (30.5, 119.05),
+        "HL": (31.61, 183.42),
+        "Head_Truss": (4.99, 92.38),
+        "Anterior_Truss": (18.22, 125.79),
+        "Mid_Truss": (18.30, 148.39),
+        "Posterior_Truss": (27.28, 168.88),
+        "Tail_Truss": (15.73, 115.95)
+    }
+}
+
+# Key differentiators for quick identification
+KEY_DIFFERENTIATORS = {
+    "SL": {
+        "Planiliza subviridis": "250-350 mm (Large)",
+        "Moolgarda seheli": "120-180 mm (Small-Medium)",
+        "Osteomugil perusii": "120-180 mm (Small-Medium)",
+        "Moolgarda tade": "250-350 mm (Large)",
+        "Ellochelon vaigiensis": "120-180 mm (Small-Medium)"
+    },
+    "ND2_Total": {
+        "Planiliza subviridis": "6-9",
+        "Moolgarda seheli": "6-9",
+        "Osteomugil perusii": "6-9",
+        "Moolgarda tade": "8-9 (Higher)",
+        "Ellochelon vaigiensis": "6-9"
+    },
+    "NP": {
+        "Planiliza subviridis": "10-15",
+        "Moolgarda seheli": "10-16",
+        "Osteomugil perusii": "10-16",
+        "Moolgarda tade": "15-17 (Higher)",
+        "Ellochelon vaigiensis": "10-16"
+    }
+}
+
+def validate_measurements(features, species=None):
+    """Check if measurements are within range for each species"""
+    warnings_list = []
+    possible_species = []
+    
+    feature_names = list(SPECIES_RANGES["Planiliza subviridis"].keys())
+    
+    for species_name in SPECIES_RANGES.keys():
+        in_range_count = 0
+        total_checks = 0
+        
+        for i, feature in enumerate(feature_names):
+            min_val, max_val = SPECIES_RANGES[species_name][feature]
+            value = features[i]
+            
+            if min_val <= value <= max_val:
+                in_range_count += 1
+            total_checks += 1
+        
+        match_percentage = (in_range_count / total_checks) * 100
+        if match_percentage > 50:
+            possible_species.append((species_name, match_percentage))
+        
+        # Collect warnings for current input
+        if species and species == species_name:
+            for i, feature in enumerate(feature_names):
+                min_val, max_val = SPECIES_RANGES[species_name][feature]
+                value = features[i]
+                if not (min_val <= value <= max_val):
+                    warnings_list.append(f"⚠️ {feature}: {value} is outside typical range ({min_val}-{max_val}) for {species_name}")
+    
+    # Sort by match percentage
+    possible_species.sort(key=lambda x: x[1], reverse=True)
+    
+    return warnings_list, possible_species
+
+def get_suggestion_from_range(features):
+    """Suggest species based purely on measurement ranges"""
+    feature_names = list(SPECIES_RANGES["Planiliza subviridis"].keys())
+    scores = {}
+    
+    for species_name in SPECIES_RANGES.keys():
+        in_range_count = 0
+        total_checks = 0
+        
+        for i, feature in enumerate(feature_names):
+            min_val, max_val = SPECIES_RANGES[species_name][feature]
+            value = features[i]
+            
+            if min_val <= value <= max_val:
+                in_range_count += 1
+            total_checks += 1
+        
+        scores[species_name] = (in_range_count / total_checks) * 100
+    
+    best_species = max(scores, key=scores.get)
+    return best_species, scores
 
 # ===============================
 # SIDEBAR
@@ -528,7 +703,7 @@ if uploaded_file is not None:
             st.pyplot(fig)
     
     # ===============================
-    # PREDICTION SECTION
+    # PREDICTION SECTION WITH RANGE VALIDATION
     # ===============================
     
     if 'ann_model' in st.session_state:
@@ -540,166 +715,48 @@ if uploaded_file is not None:
         scaler = st.session_state['scaler']
         label_encoder = st.session_state['label_encoder']
         
-        # Reference Table
-        with st.expander("📖 SPECIES REFERENCE TABLE", expanded=True):
-            ref_data = {
-                'Feature': ['ND1_Total', 'ND2_Total', 'NP', 'NC', 'NV_Total', 'NA_Total', 'SL (mm)'],
-                'Planiliza subviridis': [4, 6, '12-15', '12-15', 6, '9-11', '250-350'],
-                'Moolgarda seheli': [4, '7-8', '14-17', '14-17', 6, '9-11', '120-180'],
-                'Osteomugil perusii': [4, '6-7', '12-15', '12-15', 6, '9-11', '120-180'],
-                'Moolgarda tade': [4, 8, '15-17', '13-19', 6, '9-11', '250-350'],
-                'Ellochelon vaigiensis': [4, '5-8', '10-16', '11-16', 6, '9-11', '120-180']
-            }
-            ref_df = pd.DataFrame(ref_data)
-            st.dataframe(ref_df, use_container_width=True)
+        # KEY DIFFERENTIATOR HIGHLIGHT
+        st.info("""
+        💡 **Key Differentiators for Accurate Identification:**
+        - **Moolgarda tade** has HIGHER NP (15-17) and ND2_Total (8-9)
+        - **Planiliza subviridis** and **Moolgarda tade** are LARGER (SL > 250mm)
+        - **Moolgarda seheli**, **Osteomugil perusii**, **Ellochelon vaigiensis** are SMALLER (SL < 200mm)
+        """)
         
-        st.info("💡 **Tips:** Use the reference table above. ND2_Total and SL are key differentiators between species.")
+        # Reference Table with Ranges
+        with st.expander("📖 SPECIES MEASUREMENT RANGES", expanded=True):
+            
+            # Create a formatted table
+            range_table_data = []
+            for species in SPECIES_RANGES.keys():
+                row = {
+                    "Species": species,
+                    "ND2": f"{SPECIES_RANGES[species]['ND2_Total'][0]}-{SPECIES_RANGES[species]['ND2_Total'][1]}",
+                    "NP": f"{SPECIES_RANGES[species]['NP'][0]}-{SPECIES_RANGES[species]['NP'][1]}",
+                    "NC": f"{SPECIES_RANGES[species]['NC'][0]}-{SPECIES_RANGES[species]['NC'][1]}",
+                    "SL (mm)": f"{SPECIES_RANGES[species]['SL'][0]:.0f}-{SPECIES_RANGES[species]['SL'][1]:.0f}"
+                }
+                range_table_data.append(row)
+            
+            range_df = pd.DataFrame(range_table_data)
+            st.dataframe(range_df, use_container_width=True)
+            
+            st.caption("ℹ️ Measurements outside these ranges may be flagged as warnings")
         
         # Quick select buttons
         st.subheader("Quick Select - Test with Reference Values")
         col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
         
         def get_ref_vals(species):
-            if species == "Planiliza subviridis":
-                return (4, 6, 14, 14, 6, 10, 300, 40, 45, 40, 80, 70, 200, 200, 200)
-            elif species == "Moolgarda seheli":
-                return (4, 7, 15, 15, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
-            elif species == "Osteomugil perusii":
-                return (4, 6, 14, 14, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
-            elif species == "Moolgarda tade":
-                return (4, 8, 16, 16, 6, 10, 300, 50, 60, 50, 80, 70, 200, 200, 200)
-            else:
-                return (4, 6, 13, 13, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
-        
-        if col_b1.button("📌 Planiliza"):
-            st.session_state['ref_vals'] = get_ref_vals("Planiliza subviridis")
-        if col_b2.button("📌 Moolgarda s"):
-            st.session_state['ref_vals'] = get_ref_vals("Moolgarda seheli")
-        if col_b3.button("📌 Osteomugil"):
-            st.session_state['ref_vals'] = get_ref_vals("Osteomugil perusii")
-        if col_b4.button("📌 Moolgarda t"):
-            st.session_state['ref_vals'] = get_ref_vals("Moolgarda tade")
-        if col_b5.button("📌 Ellochelon"):
-            st.session_state['ref_vals'] = get_ref_vals("Ellochelon vaigiensis")
-        
-        # Get values
-        if 'ref_vals' in st.session_state:
-            (nd1_def, nd2_def, np_def, nc_def, nv_def, na_def, 
-             sl_def, pl_def, bh_def, hl_def, head_def, ant_def, 
-             mid_def, post_def, tail_def) = st.session_state['ref_vals']
-        else:
-            (nd1_def, nd2_def, np_def, nc_def, nv_def, na_def, 
-             sl_def, pl_def, bh_def, hl_def, head_def, ant_def, 
-             mid_def, post_def, tail_def) = (4, 6, 14, 14, 6, 10, 150, 35, 40, 35, 80, 70, 200, 200, 200)
-        
-        # Input form
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Meristic Features")
-            nd1 = st.number_input("ND1_Total", value=nd1_def, step=1.0)
-            nd2 = st.number_input("ND2_Total", value=nd2_def, step=1.0, help="KEY FEATURE - Differentiates species")
-            np_val = st.number_input("NP", value=np_def, step=1.0)
-            nc = st.number_input("NC", value=nc_def, step=1.0)
-            nv = st.number_input("NV_Total", value=nv_def, step=1.0)
-            na = st.number_input("NA_Total", value=na_def, step=1.0)
-        
-        with col2:
-            st.subheader("Morphometric Features (mm)")
-            sl = st.number_input("SL", value=sl_def, step=10.0, help="KEY FEATURE - Size differentiator")
-            pl = st.number_input("PL", value=pl_def, step=5.0)
-            bh = st.number_input("BH", value=bh_def, step=5.0)
-            hl = st.number_input("HL", value=hl_def, step=5.0)
-            
-            st.subheader("Truss Features (mm)")
-            head = st.number_input("Head_Truss", value=head_def, step=10.0)
-            ant = st.number_input("Anterior_Truss", value=ant_def, step=10.0)
-            mid = st.number_input("Mid_Truss", value=mid_def, step=20.0)
-            post = st.number_input("Posterior_Truss", value=post_def, step=20.0)
-            tail = st.number_input("Tail_Truss", value=tail_def, step=20.0)
-        
-        # Model selection
-        model_choice = st.selectbox(
-            "Select Model for Prediction",
-            ["ANN-PSO (Recommended)", "ANN (Baseline)", "ANN-GA", "ANN-GWO", "Ensemble"]
-        )
-        
-        if st.button("🔍 Predict Species", type="primary"):
-            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl,
-                                  head, ant, mid, post, tail]])
-            features_scaled = scaler.transform(features)
-            
-            if model_choice == "ANN (Baseline)":
-                model = st.session_state['ann_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-            elif model_choice == "ANN-PSO (Recommended)":
-                model = st.session_state['pso_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-            elif model_choice == "ANN-GA":
-                model = st.session_state['ga_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-            elif model_choice == "ANN-GWO":
-                model = st.session_state['gwo_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-            else:  # Ensemble
-                models_list = [
-                    st.session_state['ann_model'],
-                    st.session_state['pso_model'],
-                    st.session_state['ga_model'],
-                    st.session_state['gwo_model']
-                ]
-                predictions = [m.predict(features_scaled)[0] for m in models_list]
-                all_probas = [m.predict_proba(features_scaled)[0] for m in models_list]
-                pred = max(set(predictions), key=predictions.count)
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = np.mean(all_probas, axis=0)
-            
-            st.success(f"### 🎯 Predicted Species: **{species}**")
-            
-            confidence = max(proba) * 100
-            st.progress(int(confidence))
-            st.caption(f"Confidence: {confidence:.1f}%")
-            
-            # Show probabilities
-            st.subheader("Species Probabilities")
-            prob_df = pd.DataFrame({
-                'Species': label_encoder.classes_,
-                'Probability': proba
-            }).sort_values('Probability', ascending=False)
-            st.bar_chart(prob_df.set_index('Species'))
-    
-else:
-    st.info("👈 Please upload your Excel file to begin")
-    
-    with st.expander("📖 How to Use This App"):
-        st.markdown("""
-        1. **Upload** your Excel file
-        2. **Configure** simulation (target: 250 samples, noise: 8%)
-        3. **Generate** simulated data
-        4. **Train** all 4 models
-        5. **Compare** results
-        6. **Make predictions** using reference table
-        """)
-
-# ===============================
-# FOOTER
-# ===============================
-
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: gray;'>
-    <p>🐟 Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO</p>
-    <p>FYP Project | Universiti Malaysia Terengganu</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+            ranges = SPECIES_RANGES[species]
+            return (
+                ranges["ND1_Total"][0], 
+                (ranges["ND2_Total"][0] + ranges["ND2_Total"][1]) // 2,
+                (ranges["NP"][0] + ranges["NP"][1]) // 2,
+                (ranges["NC"][0] + ranges["NC"][1]) // 2,
+                (ranges["NV_Total"][0] + ranges["NV_Total"][1]) // 2,
+                (ranges["NA_Total"][0] + ranges["NA_Total"][1]) // 2,
+                (ranges["SL"][0] + ranges["SL"][1]) // 2,
+                (ranges["PL"][0] + ranges["PL"][1]) // 2,
+                (ranges["BH"][0] + ranges["BH"][1]) // 2,
+                (ranges["
