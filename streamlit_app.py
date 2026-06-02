@@ -395,6 +395,20 @@ if uploaded_file is not None:
         best_acc = res_df.iloc[best_idx]['Accuracy']
         st.success(f"🏆 **Best Method: {best_method}** with {best_acc:.3f} ({best_acc*100:.1f}%) accuracy")
         
+        # Store best model for prediction
+        if best_method == "ANN":
+            best_model = st.session_state['ann_model']
+        elif best_method == "PSO":
+            best_model = st.session_state['pso_model']
+        elif best_method == "GA":
+            best_model = st.session_state['ga_model']
+        else:
+            best_model = st.session_state['gwo_model']
+        
+        st.session_state['best_model'] = best_model
+        st.session_state['best_method_name'] = best_method
+        st.session_state['best_accuracy'] = best_acc
+        
         # Charts
         col1, col2 = st.columns(2)
         
@@ -472,7 +486,6 @@ if uploaded_file is not None:
         
         st.subheader("📋 Per-Species Classification Accuracy")
         
-        # Calculate per-species accuracy for each model
         species_list = label_encoder.classes_
         
         per_species_data = []
@@ -480,7 +493,6 @@ if uploaded_file is not None:
         for i, species in enumerate(species_list):
             mask = y_test == i
             if mask.sum() > 0:
-                # Accuracy for each model on this species
                 ann_correct = (y_pred_ann[mask] == i).sum()
                 pso_correct = (y_pred_pso[mask] == i).sum()
                 ga_correct = (y_pred_ga[mask] == i).sum()
@@ -499,7 +511,7 @@ if uploaded_file is not None:
         per_species_df = pd.DataFrame(per_species_data)
         st.dataframe(per_species_df, use_container_width=True)
         
-        # Also show as bar chart for better visualization
+        # Bar chart for per-species accuracy
         st.subheader("📊 Per-Species Accuracy Visualization")
         
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -533,10 +545,44 @@ if uploaded_file is not None:
     # PREDICTION SECTION
     # ===============================
     
-           if st.button("🔍 Identify Species", type="primary"):
+    if 'best_model' in st.session_state:
+        st.header("🔮 Step 5: Identify Fish Species")
+        st.info(f"🎯 **Using Best Model: {st.session_state['best_method_name']}** (Accuracy: {st.session_state['best_accuracy']:.3f})")
+        
+        st.markdown("### Enter 15 Morphometric Measurements")
+        
+        # Input form
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.subheader("Meristic Features")
+            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
+            nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
+            np_val = st.number_input("NP", value=14.0, step=1.0)
+            nc = st.number_input("NC", value=14.0, step=1.0)
+            nv = st.number_input("NV_Total", value=6.0, step=1.0)
+            na = st.number_input("NA_Total", value=10.0, step=1.0)
+        
+        with col2:
+            st.subheader("Morphometric Features (mm)")
+            sl = st.number_input("SL", value=150.0, step=10.0)
+            pl = st.number_input("PL", value=40.0, step=5.0)
+            bh = st.number_input("BH", value=45.0, step=5.0)
+            hl = st.number_input("HL", value=40.0, step=5.0)
+        
+        with col3:
+            st.subheader("Truss Features (mm)")
+            head = st.number_input("Head_Truss", value=80.0, step=10.0)
+            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
+            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
+            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
+            tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
+        
+        if st.button("🔍 Identify Species", type="primary"):
             features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]])
             features_scaled = st.session_state['scaler'].transform(features)
             
+            best_model = st.session_state['best_model']
             pred = best_model.predict(features_scaled)[0]
             species = st.session_state['label_encoder'].inverse_transform([pred])[0]
             proba = best_model.predict_proba(features_scaled)[0]
@@ -586,7 +632,7 @@ if uploaded_file is not None:
                     })
             
             st.dataframe(pd.DataFrame(species_accuracy), use_container_width=True)
-            st.caption(f"📌 Based on {best_model_name} model - {len(y_test)} test samples")
+            st.caption(f"📌 Based on {st.session_state['best_method_name']} model - {len(y_test)} test samples")
             
             if confidence < 60:
                 st.warning("⚠️ Low confidence prediction. Please verify measurements.")
