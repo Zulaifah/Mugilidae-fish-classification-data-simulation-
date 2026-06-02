@@ -1,7 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO
-# With Confusion Matrices
+# COMPLETE: Training + Comparison + Prediction
 # ===============================
 
 import streamlit as st
@@ -34,14 +33,10 @@ st.sidebar.info("""
 - ANN-GA (Genetic Algorithm)
 - ANN-GWO (Grey Wolf Optimizer)
 
-**Features:**
-- 15 Morphometric Measurements
-- 5 Mugilidae Species
+**15 Features:** Meristic (6), Morphometric (4), Truss (5)
 
 **Data:** Real + Simulated
 """)
-
-st.sidebar.markdown("---")
 st.sidebar.caption("FYP Project | UMT")
 
 # ===============================
@@ -106,6 +101,13 @@ FEATURE_NAMES = [
     "Mid_Truss", "Posterior_Truss", "Tail_Truss"
 ]
 
+FEATURE_DISPLAY = [
+    "ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
+    "SL (mm)", "PL (mm)", "BH (mm)", "HL (mm)",
+    "Head_Truss (mm)", "Anterior_Truss (mm)", "Mid_Truss (mm)",
+    "Posterior_Truss (mm)", "Tail_Truss (mm)"
+]
+
 # ===============================
 # FILE UPLOAD
 # ===============================
@@ -123,7 +125,7 @@ if uploaded_file is not None:
     # LOAD AND PROCESS DATA
     # ===============================
     
-    with st.spinner("Loading and processing data..."):
+    with st.spinner("Extracting data from Excel..."):
         
         species_names = [
             "Planiliza subviridis",
@@ -201,12 +203,6 @@ if uploaded_file is not None:
     
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
-    # Show data distribution
-    dist_data = []
-    for sp in species_names:
-        dist_data.append({"Species": sp, "Real Specimens": len(real_df[real_df['Species'] == sp])})
-    st.dataframe(pd.DataFrame(dist_data), use_container_width=True)
-    
     # ===============================
     # DATA SIMULATION
     # ===============================
@@ -246,13 +242,7 @@ if uploaded_file is not None:
                 final_df[col] = final_df[col].fillna(final_df[col].median())
             
             st.session_state['final_df'] = final_df
-            
             st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
-            
-            sim_dist = []
-            for sp in species_names:
-                sim_dist.append({"Species": sp, "Total Specimens": len(final_df[final_df['Species'] == sp])})
-            st.dataframe(pd.DataFrame(sim_dist), use_container_width=True)
     
     # ===============================
     # TRAIN MODELS
@@ -399,12 +389,10 @@ if uploaded_file is not None:
     # ===============================
     
     if 'results' in st.session_state:
-        st.header("📊 Step 4: Results")
+        st.header("📊 Step 4: Model Comparison Results")
         
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
-        
-        # Highlight best accuracy
         styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
         st.dataframe(styled, use_container_width=True)
         
@@ -412,10 +400,9 @@ if uploaded_file is not None:
         best_idx = res_df['Accuracy'].argmax()
         best_method = res_df.iloc[best_idx]['Method']
         best_acc = res_df.iloc[best_idx]['Accuracy']
-        
         st.success(f"🏆 **Best Method: {best_method}** with {best_acc:.3f} ({best_acc*100:.1f}%) accuracy")
         
-        # Accuracy & Time Charts
+        # Charts
         col1, col2 = st.columns(2)
         
         with col1:
@@ -426,8 +413,7 @@ if uploaded_file is not None:
             ax.set_ylabel('Accuracy')
             ax.set_title('Accuracy Comparison')
             for bar, acc in zip(bars, res_df['Accuracy']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, 
-                       f'{acc:.3f}', ha='center')
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, f'{acc:.3f}', ha='center')
             st.pyplot(fig)
         
         with col2:
@@ -437,17 +423,12 @@ if uploaded_file is not None:
             ax.set_ylabel('Time (seconds)')
             ax.set_title('Time Comparison')
             for bar, t in zip(bars, res_df['Time']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, 
-                       f'{t:.1f}s', ha='center')
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
             st.pyplot(fig)
         
-        # ===============================
-        # CONFUSION MATRICES
-        # ===============================
+        # Confusion Matrices
+        st.subheader("📊 Confusion Matrices")
         
-        st.subheader("📊 Confusion Matrices for All Models")
-        
-        # Get predictions and test data
         X_test = st.session_state['X_test']
         y_test = st.session_state['y_test']
         label_encoder = st.session_state['label_encoder']
@@ -459,71 +440,115 @@ if uploaded_file is not None:
         
         species_short = [s.split()[0] for s in label_encoder.classes_]
         
-        # Create 2x2 grid
         fig, axes = plt.subplots(2, 2, figsize=(14, 12))
         
-        # ANN
         cm_ann = confusion_matrix(y_test, y_pred_ann)
         sns.heatmap(cm_ann, annot=True, fmt='d', cmap='Blues', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[0,0])
-        axes[0,0].set_title('ANN (Baseline)', fontsize=12, fontweight='bold')
+        axes[0,0].set_title('ANN', fontsize=12, fontweight='bold')
         axes[0,0].set_xlabel('Predicted')
         axes[0,0].set_ylabel('Actual')
         
-        # PSO
         cm_pso = confusion_matrix(y_test, y_pred_pso)
         sns.heatmap(cm_pso, annot=True, fmt='d', cmap='Greens', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[0,1])
-        axes[0,1].set_title('ANN-PSO', fontsize=12, fontweight='bold')
+        axes[0,1].set_title('PSO', fontsize=12, fontweight='bold')
         axes[0,1].set_xlabel('Predicted')
         axes[0,1].set_ylabel('Actual')
         
-        # GA
         cm_ga = confusion_matrix(y_test, y_pred_ga)
         sns.heatmap(cm_ga, annot=True, fmt='d', cmap='Oranges', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[1,0])
-        axes[1,0].set_title('ANN-GA', fontsize=12, fontweight='bold')
+        axes[1,0].set_title('GA', fontsize=12, fontweight='bold')
         axes[1,0].set_xlabel('Predicted')
         axes[1,0].set_ylabel('Actual')
         
-        # GWO
         cm_gwo = confusion_matrix(y_test, y_pred_gwo)
         sns.heatmap(cm_gwo, annot=True, fmt='d', cmap='Reds', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[1,1])
-        axes[1,1].set_title('ANN-GWO', fontsize=12, fontweight='bold')
+        axes[1,1].set_title('GWO', fontsize=12, fontweight='bold')
         axes[1,1].set_xlabel('Predicted')
         axes[1,1].set_ylabel('Actual')
         
         plt.tight_layout()
         st.pyplot(fig)
+    
+    # ===============================
+    # PREDICTION SECTION
+    # ===============================
+    
+    if 'best_model' in locals() or ('pso_model' in st.session_state and 'results' in st.session_state):
         
-        # Per-class accuracy for best model
-        st.subheader(f"📋 Per-Class Accuracy - {best_method} (Best Model)")
-        
-        if best_method == "ANN":
-            best_pred = y_pred_ann
-        elif best_method == "PSO":
-            best_pred = y_pred_pso
-        elif best_method == "GA":
-            best_pred = y_pred_ga
+        # Get best model
+        if 'results' in st.session_state:
+            best_idx = np.argmax([r['Accuracy'] for r in st.session_state['results']])
+            best_model_name = st.session_state['results'][best_idx]['Method']
+            
+            if best_model_name == "ANN":
+                best_model = st.session_state['ann_model']
+            elif best_model_name == "PSO":
+                best_model = st.session_state['pso_model']
+            elif best_model_name == "GA":
+                best_model = st.session_state['ga_model']
+            else:
+                best_model = st.session_state['gwo_model']
         else:
-            best_pred = y_pred_gwo
+            best_model = st.session_state['pso_model']
+            best_model_name = "PSO"
         
-        per_class = []
-        for i, sp in enumerate(label_encoder.classes_):
-            mask = y_test == i
-            if mask.sum() > 0:
-                correct = (best_pred[mask] == i).sum()
-                total = mask.sum()
-                acc = correct / total
-                per_class.append({
-                    'Species': sp,
-                    'Correct': correct,
-                    'Total': total,
-                    'Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
-                })
+        st.header("🔮 Step 5: Identify Fish Species")
+        st.info(f"🎯 **Using Best Model: {best_model_name}** (Accuracy: {best_acc:.3f})")
         
-        st.dataframe(pd.DataFrame(per_class), use_container_width=True)
+        st.markdown("### Enter 15 Morphometric Measurements")
+        
+        # Input form - 3 columns
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.subheader("Meristic Features")
+            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
+            nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
+            np_val = st.number_input("NP", value=14.0, step=1.0)
+            nc = st.number_input("NC", value=14.0, step=1.0)
+            nv = st.number_input("NV_Total", value=6.0, step=1.0)
+            na = st.number_input("NA_Total", value=10.0, step=1.0)
+        
+        with col2:
+            st.subheader("Morphometric Features (mm)")
+            sl = st.number_input("SL", value=150.0, step=10.0)
+            pl = st.number_input("PL", value=40.0, step=5.0)
+            bh = st.number_input("BH", value=45.0, step=5.0)
+            hl = st.number_input("HL", value=40.0, step=5.0)
+        
+        with col3:
+            st.subheader("Truss Features (mm)")
+            head = st.number_input("Head_Truss", value=80.0, step=10.0)
+            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
+            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
+            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
+            tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
+        
+        if st.button("🔍 Identify Species", type="primary"):
+            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]])
+            features_scaled = st.session_state['scaler'].transform(features)
+            
+            pred = best_model.predict(features_scaled)[0]
+            species = st.session_state['label_encoder'].inverse_transform([pred])[0]
+            proba = best_model.predict_proba(features_scaled)[0]
+            confidence = max(proba) * 100
+            
+            st.markdown("---")
+            st.success(f"### 🎯 Predicted Species: **{species}**")
+            st.progress(int(confidence))
+            st.caption(f"Confidence: {confidence:.1f}%")
+            
+            # Show all probabilities
+            st.subheader("📊 Species Probabilities")
+            prob_df = pd.DataFrame({
+                'Species': st.session_state['label_encoder'].classes_,
+                'Probability': proba
+            }).sort_values('Probability', ascending=False)
+            st.bar_chart(prob_df.set_index('Species'))
 
 else:
     st.info("👈 Please upload your Excel file to begin")
@@ -535,122 +560,7 @@ else:
         3. **Generate** simulated data
         4. **Train** all 4 models
         5. **View** comparison and confusion matrices
-        """)
-
- # ===============================
-    # PREDICTION
-    # ===============================
-    
-    if 'ann_model' in st.session_state:
-        st.header("🔮 Step 5: Make a Prediction")
-        
-        st.markdown("### Enter 15 Morphometric Measurements")
-        
-        feature_names = st.session_state['feature_names']
-        scaler = st.session_state['scaler']
-        label_encoder = st.session_state['label_encoder']
-        
-        # Create input form
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Meristic Features")
-            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
-            nd2 = st.number_input("ND2_Total", value=6.0, step=1.0)
-            np_val = st.number_input("NP", value=14.0, step=1.0)
-            nc = st.number_input("NC", value=14.0, step=1.0)
-            nv = st.number_input("NV_Total", value=6.0, step=1.0)
-            na = st.number_input("NA_Total", value=10.0, step=1.0)
-        
-        with col2:
-            st.subheader("Morphometric Features (mm)")
-            sl = st.number_input("SL", value=150.0, step=10.0)
-            pl = st.number_input("PL", value=35.0, step=5.0)
-            bh = st.number_input("BH", value=40.0, step=5.0)
-            hl = st.number_input("HL", value=35.0, step=5.0)
-            
-            st.subheader("Truss Features (mm)")
-            head = st.number_input("Head_Truss", value=80.0, step=10.0)
-            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
-            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
-            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
-            tail = st.number_input("Tail_Truss", value=200.0, step=20.0)
-        
-        # Choose model for prediction
-        model_choice = st.selectbox(
-            "Select Model for Prediction",
-            ["ANN (Baseline)", "ANN-PSO", "ANN-GA", "ANN-GWO", "Ensemble (Majority Voting)"]
-        )
-        
-        if st.button("🔍 Predict Species", type="primary"):
-            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl,
-                                  head, ant, mid, post, tail]])
-            features_scaled = scaler.transform(features)
-            
-            if model_choice == "ANN (Baseline)":
-                model = st.session_state['ann_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-                
-            elif model_choice == "ANN-PSO":
-                model = st.session_state['pso_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-                
-            elif model_choice == "ANN-GA":
-                model = st.session_state['ga_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-                
-            elif model_choice == "ANN-GWO":
-                model = st.session_state['gwo_model']
-                pred = model.predict(features_scaled)[0]
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = model.predict_proba(features_scaled)[0]
-                
-            else:  # Ensemble
-                models = [
-                    st.session_state['ann_model'],
-                    st.session_state['pso_model'],
-                    st.session_state['ga_model'],
-                    st.session_state['gwo_model']
-                ]
-                predictions = [m.predict(features_scaled)[0] for m in models]
-                pred = max(set(predictions), key=predictions.count)
-                species = label_encoder.inverse_transform([pred])[0]
-                proba = models[0].predict_proba(features_scaled)[0]
-            
-            st.success(f"### 🎯 Predicted Species: **{species}**")
-            
-            # Show confidence
-            confidence = max(proba) * 100
-            st.progress(int(confidence))
-            st.caption(f"Confidence: {confidence:.1f}%")
-            
-            # Show all probabilities
-            st.subheader("Species Probabilities")
-            prob_df = pd.DataFrame({
-                'Species': label_encoder.classes_,
-                'Probability': proba
-            }).sort_values('Probability', ascending=False)
-            
-            st.bar_chart(prob_df.set_index('Species'))
-    
-else:
-    st.info("👈 Please upload your Excel file to begin")
-    
-    # Show instructions
-    with st.expander("📖 How to Use This App"):
-        st.markdown("""
-        1. **Upload** your Excel file (FYP Mugilidae Dataset(CLEANED).xlsx)
-        2. **Configure** simulation parameters (target samples per species, noise level)
-        3. **Generate** simulated data
-        4. **Train** all 4 models (ANN, ANN-PSO, ANN-GA, ANN-GWO)
-        5. **Compare** results in tables and charts
-        6. **Make predictions** using any model
+        6. **Enter measurements** to identify fish species
         """)
 
 # ===============================
@@ -658,13 +568,4 @@ else:
 # ===============================
 
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: gray;'>
-    <p>🐟 Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO</p>
-    <p>FYP Project | Universiti Malaysia Terengganu</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
 st.caption("FYP Project | Universiti Malaysia Terengganu")
