@@ -491,7 +491,7 @@ if uploaded_file is not None:
         # Model selection
         model_choice = st.selectbox(
             "Select Model",
-            ["PSO (Recommended)", "ANN", "GA", "GWO", "Ensemble"]
+            ["PSO", "ANN", "GA", "GWO", "Ensemble"]
         )
         
         if st.button("Predict Species", type="primary"):
@@ -500,7 +500,7 @@ if uploaded_file is not None:
             
             if model_choice == "ANN":
                 pred = st.session_state['pso_model']  # Placeholder - fix later
-            elif model_choice == "PSO (Recommended)":
+            elif model_choice == "PSO":
                 pred = st.session_state['pso_model'].predict(features_scaled)[0]
             elif model_choice == "GA":
                 pred = st.session_state['ga_model'].predict(features_scaled)[0]
