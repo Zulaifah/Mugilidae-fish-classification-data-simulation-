@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# SIMPLIFIED VERSION - PREDICTION ONLY
+# FIXED - NO DUPLICATE ELEMENT ERROR
 # ===============================
 
 import streamlit as st
@@ -51,6 +51,19 @@ def predict_by_range(features):
     
     best_species = max(scores, key=scores.get)
     return best_species, scores
+
+# ===============================
+# INITIALIZE SESSION STATE
+# ===============================
+
+if 'nd1' not in st.session_state:
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 7.0
+    st.session_state.np = 14.0
+    st.session_state.nc = 14.0
+    st.session_state.nv = 6.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 150.0
 
 # ===============================
 # SIDEBAR
@@ -117,60 +130,86 @@ st.header("🔮 Identify Fish Species")
 
 st.markdown("### Enter the measurements below")
 
-# Quick reference buttons
+# Quick reference buttons - USING FORM TO AVOID DUPLICATE ERROR
 st.subheader("Quick Load - Sample Values")
-cols = st.columns(5)
 
-sample_values = {
-    "Planiliza subviridis": [4, 7, 13, 14, 6, 10, 300],
-    "Moolgarda seheli": [4, 7, 14, 15, 6, 10, 150],
-    "Osteomugil perusii": [4, 7, 13, 14, 6, 10, 140],
-    "Moolgarda tade": [4, 8, 16, 16, 7, 10, 300],
-    "Ellochelon vaigiensis": [4, 7, 13, 14, 6, 10, 150]
-}
+# Use different keys for each button
+col1, col2, col3, col4, col5 = st.columns(5)
 
-def set_values(species):
-    vals = sample_values[species]
-    st.session_state['nd1'] = vals[0]
-    st.session_state['nd2'] = vals[1]
-    st.session_state['np'] = vals[2]
-    st.session_state['nc'] = vals[3]
-    st.session_state['nv'] = vals[4]
-    st.session_state['na'] = vals[5]
-    st.session_state['sl'] = vals[6]
+if col1.button("📌 Planiliza", key="btn_planiliza"):
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 7.0
+    st.session_state.np = 13.0
+    st.session_state.nc = 14.0
+    st.session_state.nv = 6.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 300.0
 
-for i, sp in enumerate(SPECIES_RANGES.keys()):
-    if cols[i].button(f"📌 {sp.split()[0]}"):
-        set_values(sp)
+if col2.button("📌 Moolgarda s", key="btn_moolgarda_s"):
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 7.0
+    st.session_state.np = 14.0
+    st.session_state.nc = 15.0
+    st.session_state.nv = 6.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 150.0
 
-# Initialize session state
-if 'nd1' not in st.session_state:
-    st.session_state['nd1'] = 4
-    st.session_state['nd2'] = 7
-    st.session_state['np'] = 14
-    st.session_state['nc'] = 14
-    st.session_state['nv'] = 6
-    st.session_state['na'] = 10
-    st.session_state['sl'] = 150
+if col3.button("📌 Osteomugil", key="btn_osteomugil"):
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 7.0
+    st.session_state.np = 13.0
+    st.session_state.nc = 14.0
+    st.session_state.nv = 6.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 140.0
+
+if col4.button("📌 Moolgarda t", key="btn_moolgarda_t"):
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 8.0
+    st.session_state.np = 16.0
+    st.session_state.nc = 16.0
+    st.session_state.nv = 7.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 300.0
+
+if col5.button("📌 Ellochelon", key="btn_ellochelon"):
+    st.session_state.nd1 = 4.0
+    st.session_state.nd2 = 7.0
+    st.session_state.np = 13.0
+    st.session_state.nc = 14.0
+    st.session_state.nv = 6.0
+    st.session_state.na = 10.0
+    st.session_state.sl = 150.0
+
+st.markdown("---")
 
 # Input form
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Meristic Features")
-    nd1 = st.number_input("ND1_Total", value=float(st.session_state['nd1']), step=1.0, key="input_nd1")
-    nd2 = st.number_input("ND2_Total", value=float(st.session_state['nd2']), step=1.0, key="input_nd2")
-    np_val = st.number_input("NP", value=float(st.session_state['np']), step=1.0, key="input_np")
-    nc = st.number_input("NC", value=float(st.session_state['nc']), step=1.0, key="input_nc")
+    nd1 = st.number_input("ND1_Total", value=st.session_state.nd1, step=1.0, key="input_nd1")
+    nd2 = st.number_input("ND2_Total", value=st.session_state.nd2, step=1.0, key="input_nd2")
+    np_val = st.number_input("NP", value=st.session_state.np, step=1.0, key="input_np")
+    nc = st.number_input("NC", value=st.session_state.nc, step=1.0, key="input_nc")
 
 with col2:
     st.subheader("Other Features")
-    nv = st.number_input("NV_Total", value=float(st.session_state['nv']), step=1.0, key="input_nv")
-    na = st.number_input("NA_Total", value=float(st.session_state['na']), step=1.0, key="input_na")
-    sl = st.number_input("SL (mm)", value=float(st.session_state['sl']), step=10.0, key="input_sl")
+    nv = st.number_input("NV_Total", value=st.session_state.nv, step=1.0, key="input_nv")
+    na = st.number_input("NA_Total", value=st.session_state.na, step=1.0, key="input_na")
+    sl = st.number_input("SL (mm)", value=st.session_state.sl, step=10.0, key="input_sl")
+
+# Update session state
+st.session_state.nd1 = nd1
+st.session_state.nd2 = nd2
+st.session_state.np = np_val
+st.session_state.nc = nc
+st.session_state.nv = nv
+st.session_state.na = na
+st.session_state.sl = sl
 
 # Predict button
-if st.button("🔍 Identify Species", type="primary"):
+if st.button("🔍 Identify Species", type="primary", key="btn_predict"):
     features = [nd1, nd2, np_val, nc, nv, na, sl]
     
     # Predict using range matching
