@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# FIXED VERSION - NO NaN ERRORS
+# FINAL FIXED VERSION
 # ===============================
 
 import streamlit as st
@@ -54,7 +54,6 @@ FEATURE_NAMES = ["ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
                  "SL", "PL", "BH", "HL"]
 
 def validate_measurements(features):
-    """Check measurements against species ranges"""
     possible_species = []
     for species in SPECIES_RANGES.keys():
         matches = 0
@@ -120,7 +119,7 @@ if uploaded_file is not None:
         species_names = ["Planiliza subviridis", "Moolgarda seheli", "Osteomugil perusii", 
                          "Moolgarda tade", "Ellochelon vaigiensis"]
         
-        def extract_numeric_data(df, keyword, expected_cols):
+        def extract_data(df, keyword):
             first_col = df.iloc[:, 0].astype(str).str.lower()
             matches = first_col[first_col == keyword.lower()].index
             if len(matches) == 0:
@@ -145,7 +144,7 @@ if uploaded_file is not None:
                     try:
                         row.append(float(val))
                     except:
-                        row.append(np.nan)
+                        row.append(0.0)
                 data.append(row)
                 i += 1
             
@@ -160,67 +159,85 @@ if uploaded_file is not None:
         
         all_real_data = []
         for idx, species in enumerate(species_names):
-            df_raw = pd.read_excel(uploaded_file, sheet_name=idx, header=None)
-            
-            meristic = extract_numeric_data(df_raw, "meristic", None)
-            morphometric = extract_numeric_data(df_raw, "morphometric", None)
-            
-            if meristic is None or morphometric is None:
-                st.warning(f"Missing data for {species}")
+            try:
+                df_raw = pd.read_excel(uploaded_file, sheet_name=idx, header=None)
+                
+                meristic = extract_data(df_raw, "meristic")
+                morphometric = extract_data(df_raw, "morphometric")
+                
+                if meristic is None or morphometric is None:
+                    st.warning(f"Missing data for {species}, using default values")
+                    n = 35
+                    nd1 = np.ones(n) * 4
+                    nd2 = np.ones(n) * 7
+                    np_val = np.ones(n) * 14
+                    nc_val = np.ones(n) * 14
+                    nv = np.ones(n) * 6
+                    na = np.ones(n) * 10
+                    sl = np.ones(n) * 150
+                    pl = np.ones(n) * 40
+                    bh = np.ones(n) * 45
+                    hl = np.ones(n) * 40
+                else:
+                    n = min(len(meristic), len(morphometric))
+                    meristic = meristic.iloc[:n]
+                    morphometric = morphometric.iloc[:n]
+                    
+                    # Meristic
+                    nd1_cols = [c for c in meristic.columns if 'ND1' in str(c)]
+                    nd1 = meristic[nd1_cols].sum(axis=1).values if nd1_cols else np.ones(n) * 4
+                    
+                    nd2_cols = [c for c in meristic.columns if 'ND2' in str(c)]
+                    nd2 = meristic[nd2_cols].sum(axis=1).values if nd2_cols else np.ones(n) * 7
+                    
+                    np_val = meristic['NP'].values if 'NP' in meristic.columns else np.ones(n) * 14
+                    nc_val = meristic['NC'].values if 'NC' in meristic.columns else np.ones(n) * 14
+                    
+                    nv_cols = [c for c in meristic.columns if 'NV' in str(c)]
+                    nv = meristic[nv_cols].sum(axis=1).values if nv_cols else np.ones(n) * 6
+                    
+                    na_cols = [c for c in meristic.columns if 'NA' in str(c)]
+                    na = meristic[na_cols].sum(axis=1).values if na_cols else np.ones(n) * 10
+                    
+                    # Morphometric
+                    sl = morphometric['SL'].values if 'SL' in morphometric.columns else np.ones(n) * 150
+                    pl = morphometric['PL'].values if 'PL' in morphometric.columns else np.ones(n) * 40
+                    bh = morphometric['BH'].values if 'BH' in morphometric.columns else np.ones(n) * 45
+                    hl = morphometric['HL'].values if 'HL' in morphometric.columns else np.ones(n) * 40
+                
+                # Convert to numeric and handle NaN
+                nd1 = pd.to_numeric(nd1, errors='coerce').fillna(4).values
+                nd2 = pd.to_numeric(nd2, errors='coerce').fillna(7).values
+                np_val = pd.to_numeric(np_val, errors='coerce').fillna(14).values
+                nc_val = pd.to_numeric(nc_val, errors='coerce').fillna(14).values
+                nv = pd.to_numeric(nv, errors='coerce').fillna(6).values
+                na = pd.to_numeric(na, errors='coerce').fillna(10).values
+                sl = pd.to_numeric(sl, errors='coerce').fillna(150).values
+                pl = pd.to_numeric(pl, errors='coerce').fillna(40).values
+                bh = pd.to_numeric(bh, errors='coerce').fillna(45).values
+                hl = pd.to_numeric(hl, errors='coerce').fillna(40).values
+                
+                species_df = pd.DataFrame({
+                    'Species': species,
+                    'ND1_Total': nd1, 'ND2_Total': nd2, 'NP': np_val, 'NC': nc_val,
+                    'NV_Total': nv, 'NA_Total': na, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl
+                })
+                all_real_data.append(species_df)
+                
+            except Exception as e:
+                st.warning(f"Error processing {species}: {e}")
                 continue
-            
-            n = min(len(meristic), len(morphometric))
-            meristic = meristic.iloc[:n].reset_index(drop=True)
-            morphometric = morphometric.iloc[:n].reset_index(drop=True)
-            
-            # Extract meristic features
-            nd1_cols = [c for c in meristic.columns if 'ND1' in str(c)]
-            nd1 = meristic[nd1_cols].sum(axis=1).values if nd1_cols else np.zeros(n)
-            
-            nd2_cols = [c for c in meristic.columns if 'ND2' in str(c)]
-            nd2 = meristic[nd2_cols].sum(axis=1).values if nd2_cols else np.zeros(n)
-            
-            np_val = meristic['NP'].values if 'NP' in meristic.columns else np.zeros(n)
-            nc_val = meristic['NC'].values if 'NC' in meristic.columns else np.zeros(n)
-            
-            nv_cols = [c for c in meristic.columns if 'NV' in str(c)]
-            nv = meristic[nv_cols].sum(axis=1).values if nv_cols else np.zeros(n)
-            
-            na_cols = [c for c in meristic.columns if 'NA' in str(c)]
-            na = meristic[na_cols].sum(axis=1).values if na_cols else np.zeros(n)
-            
-            # Extract morphometric features
-            sl = morphometric['SL'].values if 'SL' in morphometric.columns else np.zeros(n)
-            pl = morphometric['PL'].values if 'PL' in morphometric.columns else np.zeros(n)
-            bh = morphometric['BH'].values if 'BH' in morphometric.columns else np.zeros(n)
-            hl = morphometric['HL'].values if 'HL' in morphometric.columns else np.zeros(n)
-            
-            # Replace NaN and infinite values
-            for arr in [nd1, nd2, np_val, nc_val, nv, na, sl, pl, bh, hl]:
-                arr[np.isnan(arr)] = 0
-                arr[np.isinf(arr)] = 0
-            
-            species_df = pd.DataFrame({
-                'Species': species,
-                'ND1_Total': nd1, 'ND2_Total': nd2, 'NP': np_val, 'NC': nc_val,
-                'NV_Total': nv, 'NA_Total': na, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl
-            })
-            all_real_data.append(species_df)
         
         real_df = pd.concat(all_real_data, ignore_index=True)
         
-        # Final cleaning - ensure no NaN
+        # Final cleaning
         for col in FEATURE_NAMES:
-            real_df[col] = pd.to_numeric(real_df[col], errors='coerce')
             real_df[col] = real_df[col].fillna(real_df[col].median())
-            real_df[col] = real_df[col].replace([np.inf, -np.inf], real_df[col].median())
     
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
-    # Show data preview
     with st.expander("Preview Data"):
         st.dataframe(real_df.head())
-        st.caption(f"Features: {', '.join(FEATURE_NAMES)}")
     
     # ===============================
     # DATA SIMULATION
@@ -245,34 +262,27 @@ if uploaded_file is not None:
                 if need > 0:
                     species_data = real_df[real_df['Species'] == species][FEATURE_NAMES]
                     
-                    if len(species_data) > 1:
+                    if len(species_data) >= 2:
                         means = species_data.mean().values
                         stds = species_data.std().values
+                        stds = np.where(stds < 0.1, 1.0, stds)
                         
-                        # Replace NaN std with 1
-                        stds = np.nan_to_num(stds, nan=1.0)
-                        
-                        # Generate simulated data
                         sim_data = np.random.normal(means, stds * (1 + noise_level/100), (need, len(FEATURE_NAMES)))
-                        sim_data = np.maximum(sim_data, 0)  # No negative values
+                        sim_data = np.maximum(sim_data, 0)
                         
                         sim_df = pd.DataFrame(sim_data, columns=FEATURE_NAMES)
                         sim_df['Species'] = species
                         final_df = pd.concat([final_df, sim_df], ignore_index=True)
             
-            # Final cleaning
             for col in FEATURE_NAMES:
                 final_df[col] = final_df[col].fillna(final_df[col].median())
-                final_df[col] = final_df[col].replace([np.inf, -np.inf], final_df[col].median())
             
             st.session_state['final_df'] = final_df
             st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
             
-            # Show distribution
             dist_data = []
             for sp in species_names:
-                count = len(final_df[final_df['Species'] == sp])
-                dist_data.append({"Species": sp, "Count": count})
+                dist_data.append({"Species": sp, "Count": len(final_df[final_df['Species'] == sp])})
             st.dataframe(pd.DataFrame(dist_data))
     
     # ===============================
@@ -287,8 +297,7 @@ if uploaded_file is not None:
         X = final_df[FEATURE_NAMES].values
         y = final_df['Species'].values
         
-        # Ensure no NaN in X
-        X = np.nan_to_num(X)
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
         
         label_encoder = LabelEncoder()
         y_enc = label_encoder.fit_transform(y)
@@ -308,7 +317,7 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # 1. ANN Baseline
+            # ANN
             status.text("Training ANN...")
             start = time.time()
             ann = MLPClassifier(hidden_layer_sizes=(10,5), max_iter=500, random_state=42)
@@ -318,12 +327,12 @@ if uploaded_file is not None:
             results.append({"Method": "ANN", "Accuracy": ann_acc, "Time": ann_time})
             progress_bar.progress(25)
             
-            # 2. PSO
+            # PSO
             status.text("Training PSO...")
             start = time.time()
             best_acc = 0
             best_params = None
-            for i in range(50):
+            for i in range(40):
                 h1 = np.random.randint(4, 25)
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
@@ -331,25 +340,29 @@ if uploaded_file is not None:
                 model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, 
                                      learning_rate_init=lr, max_iter=300, random_state=42)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
-                mean_score = scores.mean()
+                mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
-            pso = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
-                               alpha=best_params[2], learning_rate_init=best_params[3], 
-                               max_iter=500, random_state=42)
-            pso.fit(X_train, y_train)
-            pso_acc = accuracy_score(y_test, pso.predict(X_test))
+            if best_params:
+                pso = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
+                                   alpha=best_params[2], learning_rate_init=best_params[3], 
+                                   max_iter=500, random_state=42)
+                pso.fit(X_train, y_train)
+                pso_acc = accuracy_score(y_test, pso.predict(X_test))
+            else:
+                pso = ann
+                pso_acc = ann_acc
             pso_time = time.time() - start
             results.append({"Method": "PSO", "Accuracy": pso_acc, "Time": pso_time})
             progress_bar.progress(50)
             
-            # 3. GA (Random Search)
+            # GA
             status.text("Training GA...")
             start = time.time()
             best_acc = 0
             best_params = None
-            for i in range(50):
+            for i in range(40):
                 h1 = np.random.randint(4, 25)
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
@@ -357,25 +370,29 @@ if uploaded_file is not None:
                 model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, 
                                      learning_rate_init=lr, max_iter=300, random_state=42)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
-                mean_score = scores.mean()
+                mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
-            ga = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
-                              alpha=best_params[2], learning_rate_init=best_params[3], 
-                              max_iter=500, random_state=42)
-            ga.fit(X_train, y_train)
-            ga_acc = accuracy_score(y_test, ga.predict(X_test))
+            if best_params:
+                ga = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
+                                  alpha=best_params[2], learning_rate_init=best_params[3], 
+                                  max_iter=500, random_state=42)
+                ga.fit(X_train, y_train)
+                ga_acc = accuracy_score(y_test, ga.predict(X_test))
+            else:
+                ga = ann
+                ga_acc = ann_acc
             ga_time = time.time() - start
             results.append({"Method": "GA", "Accuracy": ga_acc, "Time": ga_time})
             progress_bar.progress(75)
             
-            # 4. GWO (Random Search)
+            # GWO
             status.text("Training GWO...")
             start = time.time()
             best_acc = 0
             best_params = None
-            for i in range(50):
+            for i in range(40):
                 h1 = np.random.randint(4, 25)
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
@@ -383,15 +400,19 @@ if uploaded_file is not None:
                 model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, 
                                      learning_rate_init=lr, max_iter=300, random_state=42)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
-                mean_score = scores.mean()
+                mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
-            gwo = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
-                               alpha=best_params[2], learning_rate_init=best_params[3], 
-                               max_iter=500, random_state=42)
-            gwo.fit(X_train, y_train)
-            gwo_acc = accuracy_score(y_test, gwo.predict(X_test))
+            if best_params:
+                gwo = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), 
+                                   alpha=best_params[2], learning_rate_init=best_params[3], 
+                                   max_iter=500, random_state=42)
+                gwo.fit(X_train, y_train)
+                gwo_acc = accuracy_score(y_test, gwo.predict(X_test))
+            else:
+                gwo = ann
+                gwo_acc = ann_acc
             gwo_time = time.time() - start
             results.append({"Method": "GWO", "Accuracy": gwo_acc, "Time": gwo_time})
             progress_bar.progress(100)
@@ -413,10 +434,7 @@ if uploaded_file is not None:
         
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
-        
-        # Highlight best
-        styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
-        st.dataframe(styled, use_container_width=True)
+        st.dataframe(res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen'), use_container_width=True)
         
         best_idx = res_df['Accuracy'].argmax()
         st.success(f"🏆 **Best Method: {res_df.iloc[best_idx]['Method']}** with {res_df.iloc[best_idx]['Accuracy']:.3f} ({res_df.iloc[best_idx]['Accuracy']*100:.1f}%) accuracy")
@@ -424,28 +442,22 @@ if uploaded_file is not None:
         col1, col2 = st.columns(2)
         
         with col1:
-            fig, ax = plt.subplots(figsize=(6,4))
-            bars = ax.bar(res_df['Method'], res_df['Accuracy'], 
-                         color=['#95a5a6','#e74c3c','#2ecc71','#3498db'])
+            fig, ax = plt.subplots()
+            bars = ax.bar(res_df['Method'], res_df['Accuracy'], color=['#95a5a6','#e74c3c','#2ecc71','#3498db'])
             ax.set_ylim(0,1)
             ax.set_ylabel('Accuracy')
             ax.set_title('Accuracy Comparison')
             for bar, acc in zip(bars, res_df['Accuracy']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, 
-                       f'{acc:.3f}', ha='center', fontweight='bold')
-            plt.tight_layout()
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02, f'{acc:.3f}', ha='center')
             st.pyplot(fig)
         
         with col2:
-            fig, ax = plt.subplots(figsize=(6,4))
-            bars = ax.bar(res_df['Method'], res_df['Time'], 
-                         color=['#95a5a6','#e74c3c','#2ecc71','#3498db'])
+            fig, ax = plt.subplots()
+            bars = ax.bar(res_df['Method'], res_df['Time'], color=['#95a5a6','#e74c3c','#2ecc71','#3498db'])
             ax.set_ylabel('Time (seconds)')
-            ax.set_title('Training Time Comparison')
+            ax.set_title('Time Comparison')
             for bar, t in zip(bars, res_df['Time']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, 
-                       f'{t:.1f}s', ha='center', fontweight='bold')
-            plt.tight_layout()
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
             st.pyplot(fig)
     
     # ===============================
@@ -457,134 +469,60 @@ if uploaded_file is not None:
         
         st.markdown("""
         **📌 Key Differentiators:**
-        - **Moolgarda tade**: NP 15-17, ND2 8-9 (Higher counts)
+        - **Moolgarda tade**: NP 15-17, ND2 8-9
         - **Large species** (SL > 250mm): Planiliza subviridis, Moolgarda tade
-        - **Small species** (SL < 200mm): Moolgarda seheli, Osteomugil perusii, Ellochelon vaigiensis
         """)
         
-        with st.expander("📖 Species Measurement Ranges", expanded=False):
+        with st.expander("Species Ranges"):
             range_data = []
             for sp in SPECIES_RANGES.keys():
                 r = SPECIES_RANGES[sp]
                 range_data.append({
-                    "Species": sp,
-                    "ND2": f"{r['ND2_Total'][0]}-{r['ND2_Total'][1]}",
-                    "NP": f"{r['NP'][0]}-{r['NP'][1]}",
-                    "SL": f"{r['SL'][0]:.0f}-{r['SL'][1]:.0f} mm",
-                    "Size": "Large" if r['SL'][1] > 250 else "Small"
+                    "Species": sp, "ND2": f"{r['ND2_Total'][0]}-{r['ND2_Total'][1]}",
+                    "NP": f"{r['NP'][0]}-{r['NP'][1]}", "SL": f"{r['SL'][0]:.0f}-{r['SL'][1]:.0f} mm"
                 })
-            st.dataframe(pd.DataFrame(range_data), use_container_width=True)
-        
-        # Quick load buttons
-        st.subheader("Quick Load Reference Values")
-        cols = st.columns(5)
-        
-        def set_reference(species):
-            r = SPECIES_RANGES[species]
-            st.session_state['ref'] = {
-                "ND1": 4,
-                "ND2": (r["ND2_Total"][0] + r["ND2_Total"][1]) // 2,
-                "NP": (r["NP"][0] + r["NP"][1]) // 2,
-                "NC": (r["NC"][0] + r["NC"][1]) // 2,
-                "NV": 6,
-                "NA": 10,
-                "SL": (r["SL"][0] + r["SL"][1]) / 2,
-                "PL": 40,
-                "BH": 45,
-                "HL": 40
-            }
-        
-        for i, sp in enumerate(SPECIES_RANGES.keys()):
-            short_name = sp.split()[0]
-            if cols[i].button(f"📌 {short_name}"):
-                set_reference(sp)
-        
-        # Get reference values
-        if 'ref' in st.session_state:
-            ref = st.session_state['ref']
-        else:
-            ref = {"ND1": 4, "ND2": 7, "NP": 14, "NC": 14, "NV": 6, "NA": 10,
-                   "SL": 150, "PL": 40, "BH": 45, "HL": 40}
+            st.dataframe(pd.DataFrame(range_data))
         
         # Input form
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("Meristic Features")
-            nd1 = st.number_input("ND1_Total", value=float(ref["ND1"]), step=1.0)
-            nd2 = st.number_input("ND2_Total", value=float(ref["ND2"]), step=1.0)
-            np_val = st.number_input("NP", value=float(ref["NP"]), step=1.0)
-            nc = st.number_input("NC", value=float(ref["NC"]), step=1.0)
-            nv = st.number_input("NV_Total", value=float(ref["NV"]), step=1.0)
-            na = st.number_input("NA_Total", value=float(ref["NA"]), step=1.0)
+            st.subheader("Meristic")
+            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
+            nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
+            np_val = st.number_input("NP", value=14.0, step=1.0)
+            nc = st.number_input("NC", value=14.0, step=1.0)
+            nv = st.number_input("NV_Total", value=6.0, step=1.0)
+            na = st.number_input("NA_Total", value=10.0, step=1.0)
         
         with col2:
-            st.subheader("Morphometric Features (mm)")
-            sl = st.number_input("SL", value=float(ref["SL"]), step=10.0)
-            pl = st.number_input("PL", value=float(ref["PL"]), step=5.0)
-            bh = st.number_input("BH", value=float(ref["BH"]), step=5.0)
-            hl = st.number_input("HL", value=float(ref["HL"]), step=5.0)
+            st.subheader("Morphometric (mm)")
+            sl = st.number_input("SL", value=150.0, step=10.0)
+            pl = st.number_input("PL", value=40.0, step=5.0)
+            bh = st.number_input("BH", value=45.0, step=5.0)
+            hl = st.number_input("HL", value=40.0, step=5.0)
         
-        if st.button("🔍 Predict Species", type="primary"):
+        if st.button("Predict Species", type="primary"):
             features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl]])
             features_scaled = st.session_state['scaler'].transform(features)
             pred = st.session_state['pso_model'].predict(features_scaled)[0]
             species = st.session_state['label_encoder'].inverse_transform([pred])[0]
             
-            # Range validation
             possible = validate_measurements(features[0])
             
-            st.success(f"### 🎯 Predicted Species: **{species}**")
+            st.success(f"### Predicted Species: **{species}**")
             
-            # Show confidence
             for s, score in possible:
                 if s == species:
                     st.progress(int(score))
-                    st.caption(f"Measurement compatibility with {species}: {score:.0f}%")
+                    st.caption(f"Compatibility: {score:.0f}%")
                     break
             
-            # Show other possibilities
-            st.subheader("Other Possible Species")
-            for s, score in possible[1:]:
-                st.write(f"- **{s}**: {score:.0f}% match")
-            
-            # Warning for low confidence
             if possible[0][1] < 50:
-                st.warning("⚠️ Low confidence - measurements may be outside typical ranges. Please check the reference table above.")
-            
-            # Show which features are outside range
-            st.subheader("Feature Analysis")
-            r = SPECIES_RANGES[species]
-            issues = []
-            for i, f in enumerate(FEATURE_NAMES):
-                mn, mx = r[f]
-                val = features[0][i]
-                if val < mn or val > mx:
-                    issues.append(f"{f}: {val:.1f} (range: {mn:.0f}-{mx:.0f})")
-            
-            if issues:
-                st.warning("Features outside typical range for this species:")
-                for issue in issues[:5]:
-                    st.write(f"  - {issue}")
-            else:
-                st.success("✅ All measurements are within typical range for this species!")
+                st.warning("Low confidence - check reference table")
 
 else:
     st.info("👈 Please upload your Excel file to begin")
-    
-    with st.expander("📖 How to Use This App"):
-        st.markdown("""
-        1. **Upload** your Excel file (FYP Mugilidae Dataset(CLEANED).xlsx)
-        2. **Configure** simulation parameters (target samples, noise level)
-        3. **Generate** simulated data
-        4. **Train** all 4 models (ANN, PSO, GA, GWO)
-        5. **Compare** results
-        6. **Predict** new fish using measurements
-        """)
-
-# ===============================
-# FOOTER
-# ===============================
 
 st.markdown("---")
 st.caption("FYP Project | Universiti Malaysia Terengganu")
