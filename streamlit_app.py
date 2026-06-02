@@ -1,7 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# Comparison: ML Models (ANN, PSO, GA, GWO) with Simulation
-# Prediction: Range-Based Matching (No Bias)
+# HYBRID: ML Model (ANN/PSO/GA/GWO) + Range Validation
 # ===============================
 
 import streamlit as st
@@ -20,7 +19,7 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
 
 # ===============================
-# SPECIES RANGE DATABASE (FOR PREDICTION)
+# SPECIES RANGE DATABASE (FOR VALIDATION)
 # ===============================
 
 SPECIES_RANGES = {
@@ -74,8 +73,18 @@ FEATURE_DISPLAY = [
     "Posterior_Truss (mm)", "Tail_Truss (mm)"
 ]
 
-def predict_by_range(features):
-    """Predict species based on measurement ranges"""
+def check_in_range(species, features):
+    """Check if measurements are within species range"""
+    ranges = SPECIES_RANGES[species]
+    out_of_range = []
+    for i, f in enumerate(FEATURE_NAMES):
+        mn, mx = ranges[f]
+        if not (mn <= features[i] <= mx):
+            out_of_range.append(FEATURE_DISPLAY[i])
+    return len(out_of_range) == 0, out_of_range
+
+def get_range_compatibility(features):
+    """Calculate compatibility with each species based on ranges"""
     scores = {}
     for species, ranges in SPECIES_RANGES.items():
         matches = 0
@@ -84,11 +93,52 @@ def predict_by_range(features):
             if mn <= features[i] <= mx:
                 matches += 1
         scores[species] = (matches / len(FEATURE_NAMES)) * 100
-    best_species = max(scores, key=scores.get)
-    return best_species, scores
+    return scores
+
+def hybrid_predict(features, ml_model, scaler, label_encoder):
+    """Hybrid prediction: ML model + range validation"""
+    
+    # Step 1: ML Prediction
+    features_scaled = scaler.transform([features])
+    ml_pred = ml_model.predict(features_scaled)[0]
+    ml_species = label_encoder.inverse_transform([ml_pred])[0]
+    ml_proba = ml_model.predict_proba(features_scaled)[0]
+    ml_confidence = max(ml_proba) * 100
+    
+    # Step 2: Check if ML prediction is within range
+    in_range, out_features = check_in_range(ml_species, features)
+    
+    # Step 3: Get range compatibility for all species
+    range_scores = get_range_compatibility(features)
+    
+    if in_range:
+        # ML prediction is valid, use it
+        final_species = ml_species
+        final_confidence = ml_confidence
+        method = "ML Model (within biological range) ✅"
+        warning = None
+    else:
+        # ML prediction out of range, find best match within range
+        best_range_species = max(range_scores, key=range_scores.get)
+        best_range_score = range_scores[best_range_species]
+        
+        if best_range_score >= 60:
+            # Use range-based prediction (high confidence)
+            final_species = best_range_species
+            final_confidence = best_range_score
+            method = "Range-Based (ML prediction corrected) 🔄"
+            warning = f"ML model predicted {ml_species}, but measurements were outside typical range. Corrected to {final_species}."
+        else:
+            # Use ML but with warning
+            final_species = ml_species
+            final_confidence = ml_confidence
+            method = "ML Model (⚠️ low range compatibility)"
+            warning = f"Measurements are outside typical range for {ml_species}. Please verify measurements."
+    
+    return final_species, final_confidence, method, ml_species, in_range, warning, range_scores
 
 # ===============================
-# FUNCTIONS FOR DATA EXTRACTION (ML COMPARISON)
+# FUNCTIONS FOR DATA EXTRACTION
 # ===============================
 
 def extract_block(df, keyword):
@@ -143,15 +193,16 @@ st.sidebar.title("🐟 Mugilidae Fish Classifier")
 st.sidebar.markdown("---")
 st.sidebar.header("📋 About")
 st.sidebar.info("""
-**Comparative Study (ML Models):**
-- ANN (Baseline)
-- ANN-PSO (Particle Swarm)
-- ANN-GA (Genetic Algorithm)
-- ANN-GWO (Grey Wolf Optimizer)
+**Hybrid Classification System:**
+- ML Models: ANN, PSO, GA, GWO
+- Range Validation for Accuracy
 
-**Prediction Method:** Range-Based Matching
+**15 Features:**
+- Meristic (6)
+- Morphometric (4)
+- Truss (5)
 
-**15 Features:** Meristic (6) + Morphometric (4) + Truss (5)
+**Method:** ML + Biological Range Filter
 """)
 st.sidebar.caption("FYP Project | UMT")
 
@@ -160,14 +211,14 @@ st.sidebar.caption("FYP Project | UMT")
 # ===============================
 
 st.title("🐟 Mugilidae Fish Classification System")
-st.markdown("### Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO")
+st.markdown("### Hybrid: ML Models + Biological Range Validation")
 st.markdown("---")
 
 # ===============================
-# STEP 1: UPLOAD EXCEL FILE (FOR ML COMPARISON)
+# STEP 1: UPLOAD EXCEL FILE
 # ===============================
 
-st.header("📁 Step 1: Upload Your Excel File (for ML Comparison)")
+st.header("📁 Step 1: Upload Your Excel File")
 
 uploaded_file = st.file_uploader(
     "Upload FYP Mugilidae Dataset(CLEANED).xlsx",
@@ -182,13 +233,7 @@ if uploaded_file is not None:
     
     with st.spinner("Extracting data from Excel..."):
         
-        species_names = [
-            "Planiliza subviridis",
-            "Moolgarda seheli",
-            "Osteomugil perusii",
-            "Moolgarda tade",
-            "Ellochelon vaigiensis"
-        ]
+        species_names = list(SPECIES_RANGES.keys())
         
         all_real_data = []
         for sheet_idx, species in enumerate(species_names):
@@ -261,10 +306,10 @@ if uploaded_file is not None:
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
     # ===============================
-    # STEP 2: DATA SIMULATION (FOR ML COMPARISON)
+    # STEP 2: DATA SIMULATION
     # ===============================
     
-    st.header("📊 Step 2: Data Simulation (for ML Comparison)")
+    st.header("📊 Step 2: Data Simulation")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -300,7 +345,6 @@ if uploaded_file is not None:
             
             st.session_state['final_df'] = final_df
             
-            # Show summary
             st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
             
             count_data = []
@@ -310,11 +354,11 @@ if uploaded_file is not None:
             st.dataframe(pd.DataFrame(count_data), use_container_width=True)
     
     # ===============================
-    # STEP 3: TRAIN MODELS (ML COMPARISON)
+    # STEP 3: TRAIN ML MODELS
     # ===============================
     
     if 'final_df' in st.session_state:
-        st.header("🤖 Step 3: Train Models (ML Comparison)")
+        st.header("🤖 Step 3: Train ML Models")
         
         final_df = st.session_state['final_df']
         
@@ -345,7 +389,7 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # 1. ANN Baseline
+            # 1. ANN
             status.text("Training ANN...")
             start = time.time()
             ann = MLPClassifier(hidden_layer_sizes=(10,5), max_iter=500, random_state=42)
@@ -355,7 +399,7 @@ if uploaded_file is not None:
             results.append({"Method": "ANN", "Accuracy": ann_acc, "Time": ann_time})
             progress_bar.progress(25)
             
-            # 2. ANN-PSO
+            # 2. PSO
             status.text("Training PSO...")
             start = time.time()
             best_acc = 0
@@ -382,7 +426,7 @@ if uploaded_file is not None:
             results.append({"Method": "PSO", "Accuracy": pso_acc, "Time": pso_time})
             progress_bar.progress(50)
             
-            # 3. ANN-GA
+            # 3. GA
             status.text("Training GA...")
             start = time.time()
             best_acc = 0
@@ -409,7 +453,7 @@ if uploaded_file is not None:
             results.append({"Method": "GA", "Accuracy": ga_acc, "Time": ga_time})
             progress_bar.progress(75)
             
-            # 4. ANN-GWO
+            # 4. GWO
             status.text("Training GWO...")
             start = time.time()
             best_acc = 0
@@ -438,32 +482,33 @@ if uploaded_file is not None:
             
             status.text("Training complete!")
             
-            # Find best method (highest accuracy)
+            # Find best method
             best_idx = np.argmax([r['Accuracy'] for r in results])
             best_method_name = results[best_idx]['Method']
             best_model = [ann, pso, ga, gwo][best_idx]
+            best_accuracy = results[best_idx]['Accuracy']
             
             st.session_state['results'] = results
             st.session_state['best_model'] = best_model
             st.session_state['best_method_name'] = best_method_name
-            st.session_state['best_accuracy'] = results[best_idx]['Accuracy']
+            st.session_state['best_accuracy'] = best_accuracy
+            st.session_state['scaler'] = scaler
+            st.session_state['label_encoder'] = label_encoder
             st.session_state['X_test'] = X_test
             st.session_state['y_test'] = y_test
             
-            st.success(f"✅ All models trained successfully!")
-            st.info(f"🏆 **Best ML Method: {best_method_name}** with {results[best_idx]['Accuracy']:.3f} ({results[best_idx]['Accuracy']*100:.1f}%) accuracy")
+            st.success(f"✅ All models trained!")
+            st.info(f"🏆 **Best ML Model: {best_method_name}** with {best_accuracy:.3f} ({best_accuracy*100:.1f}%) accuracy")
     
     # ===============================
-    # STEP 4: RESULTS (ML COMPARISON)
+    # STEP 4: RESULTS
     # ===============================
     
     if 'results' in st.session_state:
-        st.header("📊 Step 4: ML Model Comparison Results")
+        st.header("📊 Step 4: ML Model Comparison")
         
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
-        
-        # Highlight best
         styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
         st.dataframe(styled, use_container_width=True)
         
@@ -489,32 +534,14 @@ if uploaded_file is not None:
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
             st.pyplot(fig)
         
-        # Per-species accuracy table for the best model
-        st.subheader("📊 Per-Species Accuracy (Best ML Model)")
-        
-        best_model = st.session_state['best_model']
-        y_pred_best = best_model.predict(st.session_state['X_test'])
-        y_true = st.session_state['y_test']
-        le = LabelEncoder()
-        le.fit([sp for sp in SPECIES_RANGES.keys()])
-        
-        per_species_acc = []
-        for i, species in enumerate(le.classes_):
-            mask = y_true == i
-            if mask.sum() > 0:
-                acc = (y_pred_best[mask] == i).sum() / mask.sum()
-                per_species_acc.append({
-                    'Species': species,
-                    'Test Samples': mask.sum(),
-                    'Correct': (y_pred_best[mask] == i).sum(),
-                    'ML Model Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
-                })
-        
-        st.dataframe(pd.DataFrame(per_species_acc), use_container_width=True)
-        
         # Confusion Matrix
         st.subheader("📊 Confusion Matrix (Best ML Model)")
-        cm = confusion_matrix(y_true, y_pred_best)
+        best_model = st.session_state['best_model']
+        y_pred = best_model.predict(st.session_state['X_test'])
+        y_true = st.session_state['y_test']
+        le = st.session_state['label_encoder']
+        
+        cm = confusion_matrix(y_true, y_pred)
         fig, ax = plt.subplots(figsize=(8, 6))
         im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
         ax.set_xticks(np.arange(len(le.classes_)))
@@ -531,124 +558,137 @@ if uploaded_file is not None:
                               ha="center", va="center", color="white" if cm[i, j] > cm.max()/2 else "black")
         plt.tight_layout()
         st.pyplot(fig)
+        
+        # Per-species accuracy
+        st.subheader("📊 Per-Species Accuracy (Best ML Model)")
+        per_species = []
+        for i, sp in enumerate(le.classes_):
+            mask = y_true == i
+            if mask.sum() > 0:
+                acc = (y_pred[mask] == i).sum() / mask.sum()
+                per_species.append({
+                    'Species': sp,
+                    'Test Samples': mask.sum(),
+                    'ML Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
+                })
+        st.dataframe(pd.DataFrame(per_species), use_container_width=True)
     
     # ===============================
-    # STEP 5: PREDICTION (RANGE-BASED - NO BIAS)
+    # STEP 5: HYBRID PREDICTION
     # ===============================
     
-    st.header("🔮 Step 5: Fish Identification (Range-Based Matching)")
-    st.info("💡 **Prediction Method:** Range-based matching using species measurement ranges (no ML bias)")
-    
-    # Reference Table
-    with st.expander("📖 Species Measurement Ranges", expanded=True):
-        range_table = []
-        for sp, ranges in SPECIES_RANGES.items():
-            range_table.append({
-                "Species": sp,
-                "ND2": f"{ranges['ND2_Total'][0]}-{ranges['ND2_Total'][1]}",
-                "NP": f"{ranges['NP'][0]}-{ranges['NP'][1]}",
-                "SL (mm)": f"{ranges['SL'][0]:.0f}-{ranges['SL'][1]:.0f}",
-                "Size": "Large" if ranges['SL'][1] > 250 else "Small-Medium"
-            })
-        st.dataframe(pd.DataFrame(range_table), use_container_width=True)
-    
-    st.markdown("### Enter 15 Fish Measurements")
-    
-    # Input form
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.subheader("Meristic Features")
-        nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
-        nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
-        np_val = st.number_input("NP", value=14.0, step=1.0)
-        nc = st.number_input("NC", value=14.0, step=1.0)
-        nv = st.number_input("NV_Total", value=6.0, step=1.0)
-        na = st.number_input("NA_Total", value=10.0, step=1.0)
-    
-    with col2:
-        st.subheader("Morphometric Features (mm)")
-        sl = st.number_input("SL", value=150.0, step=10.0)
-        pl = st.number_input("PL", value=40.0, step=5.0)
-        bh = st.number_input("BH", value=45.0, step=5.0)
-        hl = st.number_input("HL", value=40.0, step=5.0)
-    
-    with col3:
-        st.subheader("Truss Features (mm)")
-        head = st.number_input("Head_Truss", value=80.0, step=10.0)
-        ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
-        mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
-        post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
-        tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
-    
-    if st.button("🔍 Identify Species", type="primary"):
-        features = [nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]
+    if 'best_model' in st.session_state:
+        st.header("🔮 Step 5: Hybrid Fish Identification")
+        st.info("💡 **Hybrid Method:** ML Model Prediction + Biological Range Validation")
         
-        # Predict using range-based matching
-        predicted, scores = predict_by_range(features)
+        # Reference table
+        with st.expander("📖 Species Measurement Ranges", expanded=False):
+            range_table = []
+            for sp, ranges in SPECIES_RANGES.items():
+                range_table.append({
+                    "Species": sp,
+                    "ND2": f"{ranges['ND2_Total'][0]}-{ranges['ND2_Total'][1]}",
+                    "NP": f"{ranges['NP'][0]}-{ranges['NP'][1]}",
+                    "SL (mm)": f"{ranges['SL'][0]:.0f}-{ranges['SL'][1]:.0f}"
+                })
+            st.dataframe(pd.DataFrame(range_table), use_container_width=True)
         
-        st.markdown("---")
-        st.success(f"### 🎯 Identified Species: **{predicted}**")
+        st.markdown("### Enter 15 Fish Measurements")
         
-        confidence = scores[predicted]
-        st.progress(int(confidence))
-        st.caption(f"Range compatibility: {confidence:.1f}%")
+        # Input form
+        col1, col2, col3 = st.columns(3)
         
-        # Show all species compatibility
-        st.subheader("📊 Compatibility with All Species")
-        score_df = pd.DataFrame({
-            'Species': list(scores.keys()),
-            'Compatibility (%)': list(scores.values())
-        }).sort_values('Compatibility (%)', ascending=False)
-        st.dataframe(score_df, use_container_width=True)
+        with col1:
+            st.subheader("Meristic Features")
+            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
+            nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
+            np_val = st.number_input("NP", value=14.0, step=1.0)
+            nc = st.number_input("NC", value=14.0, step=1.0)
+            nv = st.number_input("NV_Total", value=6.0, step=1.0)
+            na = st.number_input("NA_Total", value=10.0, step=1.0)
         
-        # Feature analysis
-        st.subheader("📊 Feature Analysis")
-        ranges = SPECIES_RANGES[predicted]
+        with col2:
+            st.subheader("Morphometric Features (mm)")
+            sl = st.number_input("SL", value=150.0, step=10.0)
+            pl = st.number_input("PL", value=40.0, step=5.0)
+            bh = st.number_input("BH", value=45.0, step=5.0)
+            hl = st.number_input("HL", value=40.0, step=5.0)
         
-        analysis = []
-        for i, f in enumerate(FEATURE_NAMES):
-            mn, mx = ranges[f]
-            val = features[i]
-            status = "✅" if mn <= val <= mx else "❌"
-            analysis.append({
-                "Feature": FEATURE_DISPLAY[i],
-                "Your Value": f"{val:.1f}",
-                "Range": f"{mn:.1f} - {mx:.1f}",
-                "Status": status
-            })
-        st.dataframe(pd.DataFrame(analysis), use_container_width=True)
+        with col3:
+            st.subheader("Truss Features (mm)")
+            head = st.number_input("Head_Truss", value=80.0, step=10.0)
+            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
+            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
+            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
+            tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
         
-        # Tips based on key features
-        if sl > 250:
-            st.info("📏 Note: SL > 250mm indicates a LARGE species (Planiliza subviridis or Moolgarda tade)")
-        elif sl < 200:
-            st.info("📏 Note: SL < 200mm indicates a SMALL-MEDIUM species")
-        
-        if nd2 >= 8 and np_val >= 15:
-            st.info("🔍 Note: High ND2 (≥8) and NP (≥15) strongly suggests Moolgarda tade")
-        
-        if confidence < 50:
-            st.warning("⚠️ Low compatibility - measurements may be outside typical ranges. Please double-check your inputs.")
+        if st.button("🔍 Identify Species (Hybrid)", type="primary"):
+            features = [nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]
+            
+            # Hybrid prediction
+            final_species, confidence, method, ml_species, in_range, warning, range_scores = hybrid_predict(
+                features, st.session_state['best_model'], st.session_state['scaler'], st.session_state['label_encoder']
+            )
+            
+            st.markdown("---")
+            
+            # Show result
+            st.success(f"### 🎯 Identified Species: **{final_species}**")
+            st.progress(int(confidence))
+            st.caption(f"Confidence: {confidence:.1f}%")
+            st.info(f"📌 Method: {method}")
+            
+            if warning:
+                st.warning(warning)
+            
+            # Show ML prediction vs Range
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.metric("ML Model Prediction", ml_species)
+            with col_b:
+                in_range_status = "✅ Within Range" if in_range else "❌ Outside Range"
+                st.metric("Range Validation", in_range_status)
+            
+            # Show all species compatibility
+            st.subheader("📊 Species Compatibility (Range-Based)")
+            score_df = pd.DataFrame({
+                'Species': list(range_scores.keys()),
+                'Compatibility (%)': list(range_scores.values())
+            }).sort_values('Compatibility (%)', ascending=False)
+            st.dataframe(score_df, use_container_width=True)
+            
+            # Feature analysis for the final species
+            st.subheader("📊 Feature Analysis")
+            ranges = SPECIES_RANGES[final_species]
+            
+            analysis = []
+            for i, f in enumerate(FEATURE_NAMES):
+                mn, mx = ranges[f]
+                val = features[i]
+                status = "✅" if mn <= val <= mx else "❌"
+                analysis.append({
+                    "Feature": FEATURE_DISPLAY[i],
+                    "Your Value": f"{val:.1f}",
+                    "Range": f"{mn:.1f} - {mx:.1f}",
+                    "Status": status
+                })
+            st.dataframe(pd.DataFrame(analysis), use_container_width=True)
+            
+            # Tips
+            if sl > 250:
+                st.info("📏 SL > 250mm indicates a LARGE species (Planiliza subviridis or Moolgarda tade)")
+            if nd2 >= 8 and np_val >= 15:
+                st.info("🔍 High ND2 (≥8) and NP (≥15) strongly suggests Moolgarda tade")
 
 else:
-    st.info("👈 Please upload your Excel file to begin ML comparison")
+    st.info("👈 Please upload your Excel file to begin")
     
-    with st.expander("📖 How to Use"):
+    with st.expander("📖 How to Use This App"):
         st.markdown("""
-        ### ML Comparison (Steps 1-4):
-        1. Upload your Excel file
-        2. Configure simulation (target samples: 200, noise: 5%)
-        3. Generate simulated data
-        4. Train all 4 ML models (ANN, PSO, GA, GWO)
-        5. View comparison results, per-species accuracy, confusion matrix
+        ### Hybrid Classification System:
         
-        ### Fish Identification (Step 5):
-        1. Enter the 15 measurements
-        2. Click "Identify Species"
-        3. System uses range-based matching (no ML bias)
-        4. See compatibility score for each species
-        """)
-
-st.markdown("---")
-st.caption("FYP Project | Universiti Malaysia Terengganu")
+        **Step 1-4: ML Model Training**
+        - Upload your Excel file
+        - Generate simulated data
+        - Train ANN, PSO, GA, GWO models
+        -
