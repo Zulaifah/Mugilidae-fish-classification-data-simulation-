@@ -1,7 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# COMPLETE: Data Extraction + Simulation + Comparison + Prediction
-# WITH PER-SPECIES ACCURACY TABLE
+# COMPLETE: Auto Best Method + Per-Species Accuracy Table
 # ===============================
 
 import streamlit as st
@@ -15,7 +14,7 @@ warnings.filterwarnings('ignore')
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
 
@@ -94,9 +93,9 @@ st.sidebar.header("📋 About")
 st.sidebar.info("""
 **Comparative Study:**
 - ANN (Baseline)
-- ANN-PSO
-- ANN-GA
-- ANN-GWO 🏆
+- ANN-PSO (Particle Swarm)
+- ANN-GA (Genetic Algorithm)
+- ANN-GWO (Grey Wolf Optimizer)
 
 **15 Features:**
 - Meristic (6)
@@ -390,34 +389,29 @@ if uploaded_file is not None:
             progress_bar.progress(100)
             
             status.text("Training complete!")
+            
+            # Find best method (highest accuracy)
+            best_idx = np.argmax([r['Accuracy'] for r in results])
+            best_method_name = results[best_idx]['Method']
+            best_model = [ann, pso, ga, gwo][best_idx]
+            
             st.session_state['results'] = results
+            st.session_state['best_model'] = best_model
+            st.session_state['best_method_name'] = best_method_name
+            st.session_state['best_accuracy'] = results[best_idx]['Accuracy']
+            st.session_state['scaler'] = scaler
+            st.session_state['label_encoder'] = label_encoder
+            
+            # Store all models for per-species accuracy
             st.session_state['ann_model'] = ann
             st.session_state['pso_model'] = pso
             st.session_state['ga_model'] = ga
             st.session_state['gwo_model'] = gwo
-            st.session_state['scaler'] = scaler
-            st.session_state['label_encoder'] = label_encoder
+            st.session_state['X_test'] = X_test
+            st.session_state['y_test'] = y_test
             
-            # Calculate per-species accuracy for test set
-            y_pred_gwo = gwo.predict(X_test)
-            per_species_acc = {}
-            for i, species in enumerate(label_encoder.classes_):
-                mask = y_test == i
-                if mask.sum() > 0:
-                    acc = (y_pred_gwo[mask] == i).sum() / mask.sum()
-                    per_species_acc[species] = acc
-            
-            st.session_state['per_species_acc'] = per_species_acc
-            
-            st.success("✅ All models trained successfully!")
-            
-            # Display per-species accuracy table
-            st.subheader("📊 Per-Species Accuracy (GWO Model)")
-            acc_df = pd.DataFrame({
-                'Species': list(per_species_acc.keys()),
-                'Accuracy': [f"{v:.3f} ({v*100:.1f}%)" for v in per_species_acc.values()]
-            })
-            st.dataframe(acc_df, use_container_width=True)
+            st.success(f"✅ All models trained successfully!")
+            st.info(f"🏆 **Best Method: {best_method_name}** with {results[best_idx]['Accuracy']:.3f} ({results[best_idx]['Accuracy']*100:.1f}%) accuracy")
     
     # ===============================
     # STEP 4: RESULTS
@@ -430,12 +424,8 @@ if uploaded_file is not None:
         res_df = pd.DataFrame(results)
         
         # Highlight best
-        st.dataframe(res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen'), use_container_width=True)
-        
-        best_idx = res_df['Accuracy'].argmax()
-        best_method = res_df.iloc[best_idx]['Method']
-        best_acc = res_df.iloc[best_idx]['Accuracy']
-        st.success(f"🏆 **Best Method: {best_method}** with {best_acc:.3f} ({best_acc*100:.1f}%) accuracy")
+        styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
+        st.dataframe(styled, use_container_width=True)
         
         # Charts
         col1, col2 = st.columns(2)
@@ -459,24 +449,66 @@ if uploaded_file is not None:
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
             st.pyplot(fig)
         
-        # Display per-species accuracy (if not already shown)
-        if 'per_species_acc' in st.session_state:
-            st.subheader("📈 GWO Model - Per Species Accuracy")
-            acc_data = []
-            for species, acc in st.session_state['per_species_acc'].items():
-                acc_data.append({
-                    "Species": species,
-                    "Accuracy": f"{acc:.3f} ({acc*100:.1f}%)",
-                    "Correct/Total": f"{int(acc * 100)}%"  # Simplified
+        # Per-species accuracy table for the best model
+        st.subheader("📊 Per-Species Classification Accuracy (Best Model)")
+        
+        best_model = st.session_state['best_model']
+        y_pred_best = best_model.predict(st.session_state['X_test'])
+        y_true = st.session_state['y_test']
+        label_encoder = st.session_state['label_encoder']
+        
+        # Calculate per-species accuracy
+        per_species_acc = []
+        for i, species in enumerate(label_encoder.classes_):
+            mask = y_true == i
+            if mask.sum() > 0:
+                acc = (y_pred_best[mask] == i).sum() / mask.sum()
+                per_species_acc.append({
+                    'Species': species,
+                    'Test Samples': mask.sum(),
+                    'Correct Predictions': (y_pred_best[mask] == i).sum(),
+                    'Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
                 })
-            st.dataframe(pd.DataFrame(acc_data), use_container_width=True)
+            else:
+                per_species_acc.append({
+                    'Species': species,
+                    'Test Samples': 0,
+                    'Correct Predictions': 0,
+                    'Accuracy': "N/A"
+                })
+        
+        acc_df = pd.DataFrame(per_species_acc)
+        st.dataframe(acc_df, use_container_width=True)
+        
+        # Show confusion matrix
+        st.subheader("📊 Confusion Matrix (Best Model)")
+        cm = confusion_matrix(y_true, y_pred_best)
+        fig, ax = plt.subplots(figsize=(8, 6))
+        im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
+        ax.set_xticks(np.arange(len(label_encoder.classes_)))
+        ax.set_yticks(np.arange(len(label_encoder.classes_)))
+        ax.set_xticklabels([s.split()[0] for s in label_encoder.classes_], rotation=45, ha='right')
+        ax.set_yticklabels([s.split()[0] for s in label_encoder.classes_])
+        ax.set_xlabel('Predicted')
+        ax.set_ylabel('Actual')
+        ax.set_title('Confusion Matrix')
+        
+        # Add text annotations
+        for i in range(len(label_encoder.classes_)):
+            for j in range(len(label_encoder.classes_)):
+                text = ax.text(j, i, cm[i, j],
+                              ha="center", va="center", color="white" if cm[i, j] > cm.max()/2 else "black")
+        plt.tight_layout()
+        st.pyplot(fig)
     
     # ===============================
-    # STEP 5: PREDICTION
+    # STEP 5: PREDICTION (AUTO BEST METHOD)
     # ===============================
     
-    if 'gwo_model' in st.session_state:
+    if 'best_model' in st.session_state:
         st.header("🔮 Step 5: Make a Prediction")
+        
+        st.info(f"🎯 **Using Best Method: {st.session_state['best_method_name']}** (Accuracy: {st.session_state['best_accuracy']:.3f})")
         
         # Reference table
         with st.expander("📖 Species Reference Ranges (from your data)"):
@@ -497,7 +529,7 @@ if uploaded_file is not None:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.subheader("Meristic")
+            st.subheader("Meristic Features")
             nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
             nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
             np_val = st.number_input("NP", value=14.0, step=1.0)
@@ -506,88 +538,80 @@ if uploaded_file is not None:
             na = st.number_input("NA_Total", value=10.0, step=1.0)
         
         with col2:
-            st.subheader("Morphometric (mm)")
+            st.subheader("Morphometric Features (mm)")
             sl = st.number_input("SL", value=150.0, step=10.0)
             pl = st.number_input("PL", value=40.0, step=5.0)
             bh = st.number_input("BH", value=45.0, step=5.0)
             hl = st.number_input("HL", value=40.0, step=5.0)
         
         with col3:
-            st.subheader("Truss (mm)")
+            st.subheader("Truss Features (mm)")
             head = st.number_input("Head_Truss", value=80.0, step=10.0)
             ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
             mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
             post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
             tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
         
-        # Model selection
-        model_choice = st.selectbox(
-            "Select Model",
-            ["GWO (Recommended)", "ANN", "PSO", "GA", "Ensemble"]
-        )
-        
         if st.button("🔍 Predict Species", type="primary"):
             features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]])
             features_scaled = st.session_state['scaler'].transform(features)
             
-            if model_choice == "ANN":
-                pred = st.session_state['ann_model'].predict(features_scaled)[0]
-            elif model_choice == "PSO":
-                pred = st.session_state['pso_model'].predict(features_scaled)[0]
-            elif model_choice == "GA":
-                pred = st.session_state['ga_model'].predict(features_scaled)[0]
-            elif model_choice == "Ensemble":
-                models = [st.session_state['ann_model'], st.session_state['pso_model'], 
-                         st.session_state['ga_model'], st.session_state['gwo_model']]
-                preds = [m.predict(features_scaled)[0] for m in models]
-                pred = max(set(preds), key=preds.count)
-            else:  # GWO (Recommended)
-                pred = st.session_state['gwo_model'].predict(features_scaled)[0]
-            
+            # Use best model for prediction
+            best_model = st.session_state['best_model']
+            pred = best_model.predict(features_scaled)[0]
             species = st.session_state['label_encoder'].inverse_transform([pred])[0]
             
-            # Display result
-            st.success(f"### 🎯 Predicted Species: **{species}**")
-            
-            # Get confidence from GWO model
-            proba = st.session_state['gwo_model'].predict_proba(features_scaled)[0]
+            # Get prediction probability/confidence
+            proba = best_model.predict_proba(features_scaled)[0]
             confidence = max(proba) * 100
+            
+            st.success(f"### 🎯 Predicted Species: **{species}**")
             st.progress(int(confidence))
-            st.caption(f"Model confidence: {confidence:.1f}%")
+            st.caption(f"Confidence: {confidence:.1f}%")
             
             # Show all species probabilities
+            st.subheader("📊 Species Probabilities")
             prob_df = pd.DataFrame({
                 'Species': st.session_state['label_encoder'].classes_,
                 'Probability': proba
             }).sort_values('Probability', ascending=False)
             
-            st.subheader("📊 Species Probabilities")
-            st.dataframe(prob_df.style.format({'Probability': '{:.1%}'}), use_container_width=True)
+            st.bar_chart(prob_df.set_index('Species'))
             
-            # Show per-species accuracy table (from training)
-            if 'per_species_acc' in st.session_state:
-                st.subheader("📈 Model Performance - Per Species Accuracy")
-                acc_table = []
-                for s, acc in st.session_state['per_species_acc'].items():
-                    acc_table.append({
-                        "Species": s,
-                        "Model Accuracy": f"{acc:.3f} ({acc*100:.1f}%)"
+            # Display per-species accuracy table again for reference
+            st.subheader("📊 Reference: Per-Species Accuracy (Best Model)")
+            
+            # Get stored per-species accuracy
+            best_model_full = st.session_state['best_model']
+            y_pred_full = best_model_full.predict(st.session_state['X_test'])
+            y_true_full = st.session_state['y_test']
+            le = st.session_state['label_encoder']
+            
+            ref_data = []
+            for i, sp in enumerate(le.classes_):
+                mask = y_true_full == i
+                if mask.sum() > 0:
+                    acc = (y_pred_full[mask] == i).sum() / mask.sum()
+                    ref_data.append({
+                        'Species': sp,
+                        'Model Accuracy': f"{acc:.3f} ({acc*100:.1f}%)",
+                        'Test Samples': mask.sum()
                     })
-                st.dataframe(pd.DataFrame(acc_table), use_container_width=True)
-                st.caption("Note: These are test set accuracy percentages for the GWO model")
+            
+            st.dataframe(pd.DataFrame(ref_data), use_container_width=True)
 
 else:
     st.info("👈 Please upload your Excel file to begin")
     
     with st.expander("📖 How to Use"):
         st.markdown("""
-        1. **Upload** your Excel file
-        2. **Configure** simulation (target samples: 200, noise: 5%)
-        3. **Generate** simulated data
-        4. **Train** all models
-        5. **Compare** results (GWO is often best)
-        6. **Make predictions** using any model
+        1. Upload your Excel file
+        2. Configure simulation (target samples: 200, noise: 5%)
+        3. Generate simulated data
+        4. Train all models
+        5. View comparison results and per-species accuracy
+        6. Make predictions (auto uses best method)
         """)
 
 st.markdown("---")
-st.caption("FYP Project | Universiti Malaysia Terengganu | Best Method: GWO 🏆")
+st.caption("FYP Project | Universiti Malaysia Terengganu")
