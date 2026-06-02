@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# COMPLETE: Training + Comparison + Prediction
+# COMPLETE: Training + Comparison + Prediction + Per-Species Accuracy
 # ===============================
 
 import streamlit as st
@@ -99,13 +99,6 @@ FEATURE_NAMES = [
     "ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
     "SL", "PL", "BH", "HL", "Head_Truss", "Anterior_Truss",
     "Mid_Truss", "Posterior_Truss", "Tail_Truss"
-]
-
-FEATURE_DISPLAY = [
-    "ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
-    "SL (mm)", "PL (mm)", "BH (mm)", "HL (mm)",
-    "Head_Truss (mm)", "Anterior_Truss (mm)", "Mid_Truss (mm)",
-    "Posterior_Truss (mm)", "Tail_Truss (mm)"
 ]
 
 # ===============================
@@ -472,29 +465,88 @@ if uploaded_file is not None:
         
         plt.tight_layout()
         st.pyplot(fig)
+        
+        # ===============================
+        # PER-SPECIES ACCURACY TABLE
+        # ===============================
+        
+        st.subheader("📋 Per-Species Classification Accuracy")
+        
+        # Calculate per-species accuracy for each model
+        species_list = label_encoder.classes_
+        
+        per_species_data = []
+        
+        for i, species in enumerate(species_list):
+            mask = y_test == i
+            if mask.sum() > 0:
+                # Accuracy for each model on this species
+                ann_correct = (y_pred_ann[mask] == i).sum()
+                pso_correct = (y_pred_pso[mask] == i).sum()
+                ga_correct = (y_pred_ga[mask] == i).sum()
+                gwo_correct = (y_pred_gwo[mask] == i).sum()
+                total = mask.sum()
+                
+                per_species_data.append({
+                    'Species': species,
+                    'Samples': total,
+                    'ANN': f"{ann_correct}/{total} ({ann_correct/total*100:.1f}%)",
+                    'PSO': f"{pso_correct}/{total} ({pso_correct/total*100:.1f}%)",
+                    'GA': f"{ga_correct}/{total} ({ga_correct/total*100:.1f}%)",
+                    'GWO': f"{gwo_correct}/{total} ({gwo_correct/total*100:.1f}%)"
+                })
+        
+        per_species_df = pd.DataFrame(per_species_data)
+        st.dataframe(per_species_df, use_container_width=True)
+        
+        # Also show as bar chart for better visualization
+        st.subheader("📊 Per-Species Accuracy Visualization")
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        x = np.arange(len(species_list))
+        width = 0.2
+        
+        ann_pct = [float(p['ANN'].split('(')[1].replace('%)', '')) for p in per_species_data]
+        pso_pct = [float(p['PSO'].split('(')[1].replace('%)', '')) for p in per_species_data]
+        ga_pct = [float(p['GA'].split('(')[1].replace('%)', '')) for p in per_species_data]
+        gwo_pct = [float(p['GWO'].split('(')[1].replace('%)', '')) for p in per_species_data]
+        
+        ax.bar(x - width*1.5, ann_pct, width, label='ANN', color='#95a5a6')
+        ax.bar(x - width/2, pso_pct, width, label='PSO', color='#e74c3c')
+        ax.bar(x + width/2, ga_pct, width, label='GA', color='#2ecc71')
+        ax.bar(x + width*1.5, gwo_pct, width, label='GWO', color='#3498db')
+        
+        ax.set_xlabel('Species')
+        ax.set_ylabel('Accuracy (%)')
+        ax.set_title('Per-Species Accuracy by Model')
+        ax.set_xticks(x)
+        ax.set_xticklabels([s.split()[0] for s in species_list], rotation=45, ha='right')
+        ax.legend()
+        ax.set_ylim(0, 100)
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
     
     # ===============================
     # PREDICTION SECTION
     # ===============================
     
-    if 'best_model' in locals() or ('pso_model' in st.session_state and 'results' in st.session_state):
+    if 'results' in st.session_state:
         
         # Get best model
-        if 'results' in st.session_state:
-            best_idx = np.argmax([r['Accuracy'] for r in st.session_state['results']])
-            best_model_name = st.session_state['results'][best_idx]['Method']
-            
-            if best_model_name == "ANN":
-                best_model = st.session_state['ann_model']
-            elif best_model_name == "PSO":
-                best_model = st.session_state['pso_model']
-            elif best_model_name == "GA":
-                best_model = st.session_state['ga_model']
-            else:
-                best_model = st.session_state['gwo_model']
-        else:
+        best_idx = np.argmax([r['Accuracy'] for r in st.session_state['results']])
+        best_model_name = st.session_state['results'][best_idx]['Method']
+        
+        if best_model_name == "ANN":
+            best_model = st.session_state['ann_model']
+        elif best_model_name == "PSO":
             best_model = st.session_state['pso_model']
-            best_model_name = "PSO"
+        elif best_model_name == "GA":
+            best_model = st.session_state['ga_model']
+        else:
+            best_model = st.session_state['gwo_model']
         
         st.header("🔮 Step 5: Identify Fish Species")
         st.info(f"🎯 **Using Best Model: {best_model_name}** (Accuracy: {best_acc:.3f})")
@@ -559,7 +611,7 @@ else:
         2. **Configure** simulation (target: 200, noise: 5%)
         3. **Generate** simulated data
         4. **Train** all 4 models
-        5. **View** comparison and confusion matrices
+        5. **View** comparison, confusion matrices, and per-species accuracy
         6. **Enter measurements** to identify fish species
         """)
 
