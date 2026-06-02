@@ -112,43 +112,21 @@ SPECIES_RANGES = {
     }
 }
 
-# Key differentiators for quick identification
-KEY_DIFFERENTIATORS = {
-    "SL": {
-        "Planiliza subviridis": "250-350 mm (Large)",
-        "Moolgarda seheli": "120-180 mm (Small-Medium)",
-        "Osteomugil perusii": "120-180 mm (Small-Medium)",
-        "Moolgarda tade": "250-350 mm (Large)",
-        "Ellochelon vaigiensis": "120-180 mm (Small-Medium)"
-    },
-    "ND2_Total": {
-        "Planiliza subviridis": "6-9",
-        "Moolgarda seheli": "6-9",
-        "Osteomugil perusii": "6-9",
-        "Moolgarda tade": "8-9 (Higher)",
-        "Ellochelon vaigiensis": "6-9"
-    },
-    "NP": {
-        "Planiliza subviridis": "10-15",
-        "Moolgarda seheli": "10-16",
-        "Osteomugil perusii": "10-16",
-        "Moolgarda tade": "15-17 (Higher)",
-        "Ellochelon vaigiensis": "10-16"
-    }
-}
+# List of feature names in order
+FEATURE_NAMES = ["ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total", 
+                 "SL", "PL", "BH", "HL", "Head_Truss", "Anterior_Truss", 
+                 "Mid_Truss", "Posterior_Truss", "Tail_Truss"]
 
-def validate_measurements(features, species=None):
+def validate_measurements(features):
     """Check if measurements are within range for each species"""
     warnings_list = []
     possible_species = []
-    
-    feature_names = list(SPECIES_RANGES["Planiliza subviridis"].keys())
     
     for species_name in SPECIES_RANGES.keys():
         in_range_count = 0
         total_checks = 0
         
-        for i, feature in enumerate(feature_names):
+        for i, feature in enumerate(FEATURE_NAMES):
             min_val, max_val = SPECIES_RANGES[species_name][feature]
             value = features[i]
             
@@ -157,43 +135,23 @@ def validate_measurements(features, species=None):
             total_checks += 1
         
         match_percentage = (in_range_count / total_checks) * 100
-        if match_percentage > 50:
+        if match_percentage > 40:
             possible_species.append((species_name, match_percentage))
         
-        # Collect warnings for current input
-        if species and species == species_name:
-            for i, feature in enumerate(feature_names):
-                min_val, max_val = SPECIES_RANGES[species_name][feature]
-                value = features[i]
-                if not (min_val <= value <= max_val):
-                    warnings_list.append(f"⚠️ {feature}: {value} is outside typical range ({min_val}-{max_val}) for {species_name}")
-    
-    # Sort by match percentage
-    possible_species.sort(key=lambda x: x[1], reverse=True)
-    
-    return warnings_list, possible_species
-
-def get_suggestion_from_range(features):
-    """Suggest species based purely on measurement ranges"""
-    feature_names = list(SPECIES_RANGES["Planiliza subviridis"].keys())
-    scores = {}
-    
-    for species_name in SPECIES_RANGES.keys():
-        in_range_count = 0
-        total_checks = 0
-        
-        for i, feature in enumerate(feature_names):
+        # Collect warnings for the input
+        for i, feature in enumerate(FEATURE_NAMES):
             min_val, max_val = SPECIES_RANGES[species_name][feature]
             value = features[i]
-            
-            if min_val <= value <= max_val:
-                in_range_count += 1
-            total_checks += 1
-        
-        scores[species_name] = (in_range_count / total_checks) * 100
+            if not (min_val <= value <= max_val):
+                warnings_list.append(f"⚠️ {feature}: {value:.1f} is outside {species_name} range ({min_val:.0f}-{max_val:.0f})")
     
-    best_species = max(scores, key=scores.get)
-    return best_species, scores
+    # Remove duplicates in warnings
+    warnings_list = list(set(warnings_list))
+    
+    # Sort possible species by match percentage
+    possible_species.sort(key=lambda x: x[1], reverse=True)
+    
+    return warnings_list[:10], possible_species[:3]
 
 # ===============================
 # SIDEBAR
@@ -347,10 +305,9 @@ if uploaded_file is not None:
             all_real_data.append(species_df)
         
         real_df = pd.concat(all_real_data, ignore_index=True)
-        feature_names = [c for c in real_df.columns if c != 'Species']
         
         # Clean data
-        for col in feature_names:
+        for col in FEATURE_NAMES:
             real_df[col] = pd.to_numeric(real_df[col], errors='coerce')
             real_df[col] = real_df[col].fillna(real_df[col].median())
     
@@ -384,7 +341,7 @@ if uploaded_file is not None:
             # Calculate statistics per species
             species_stats = {}
             for species in species_names:
-                species_data = real_df[real_df['Species'] == species][feature_names]
+                species_data = real_df[real_df['Species'] == species][FEATURE_NAMES]
                 species_stats[species] = {
                     'mean': species_data.mean().values,
                     'std': species_data.std().values,
@@ -405,12 +362,12 @@ if uploaded_file is not None:
                     simulated_features = np.random.multivariate_normal(mean_vec, cov_matrix, n_simulate)
                     simulated_features = np.maximum(simulated_features, 0)
                     
-                    sim_df = pd.DataFrame(simulated_features, columns=feature_names)
+                    sim_df = pd.DataFrame(simulated_features, columns=FEATURE_NAMES)
                     sim_df['Species'] = species
                     
                     # Add noise
                     noise_scale = noise_level / 100
-                    for i, col in enumerate(feature_names):
+                    for i, col in enumerate(FEATURE_NAMES):
                         col_std = stats_data['std'][i]
                         noise = np.random.normal(0, noise_scale * col_std, n_simulate)
                         sim_df[col] = sim_df[col] + noise
@@ -422,7 +379,6 @@ if uploaded_file is not None:
             final_df = pd.concat([real_df, simulated_df], ignore_index=True)
             
             st.session_state['final_df'] = final_df
-            st.session_state['feature_names'] = feature_names
             
             # Show summary
             st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
@@ -441,13 +397,6 @@ if uploaded_file is not None:
                 })
             
             st.dataframe(pd.DataFrame(count_data), use_container_width=True)
-            
-            # Check if balanced
-            counts = [c['Total'] for c in count_data]
-            if max(counts) - min(counts) < 50:
-                st.success("✅ Dataset is well-balanced! This will improve prediction accuracy.")
-            else:
-                st.warning("⚠️ Dataset is not perfectly balanced. Consider increasing target samples.")
     
     # ===============================
     # TRAIN MODELS
@@ -457,10 +406,9 @@ if uploaded_file is not None:
         st.header("🤖 Step 3: Train Models")
         
         final_df = st.session_state['final_df']
-        feature_names = st.session_state['feature_names']
         
         # Prepare data
-        X = final_df[feature_names].values
+        X = final_df[FEATURE_NAMES].values
         y = final_df['Species'].values
         
         label_encoder = LabelEncoder()
@@ -479,12 +427,6 @@ if uploaded_file is not None:
             st.metric("Training Samples", len(X_train))
         with col2:
             st.metric("Test Samples", len(X_test))
-        
-        # Show class distribution
-        st.caption("Training set class distribution:")
-        train_counts = pd.Series(y_train).value_counts().sort_index()
-        for i, species in enumerate(label_encoder.classes_):
-            st.caption(f"  {species}: {train_counts[i]} samples")
         
         if st.button("🚀 Train All Models", type="primary"):
             
@@ -512,8 +454,7 @@ if uploaded_file is not None:
             results.append({
                 'Method': 'ANN (Baseline)', 
                 'Accuracy': ann_acc, 
-                'Time': ann_time, 
-                'Architecture': str(grid_search.best_params_['hidden_layer_sizes'])
+                'Time': ann_time
             })
             progress_bar.progress(25)
             
@@ -548,8 +489,7 @@ if uploaded_file is not None:
             results.append({
                 'Method': 'ANN-PSO', 
                 'Accuracy': pso_acc, 
-                'Time': pso_time, 
-                'Architecture': f'{best_pso_params[0]} → {best_pso_params[1]}'
+                'Time': pso_time
             })
             progress_bar.progress(50)
             
@@ -584,8 +524,7 @@ if uploaded_file is not None:
             results.append({
                 'Method': 'ANN-GA', 
                 'Accuracy': ga_acc, 
-                'Time': ga_time, 
-                'Architecture': f'{best_ga_params[0]} → {best_ga_params[1]}'
+                'Time': ga_time
             })
             progress_bar.progress(75)
             
@@ -620,41 +559,17 @@ if uploaded_file is not None:
             results.append({
                 'Method': 'ANN-GWO', 
                 'Accuracy': gwo_acc, 
-                'Time': gwo_time, 
-                'Architecture': f'{best_gwo_params[0]} → {best_gwo_params[1]}'
+                'Time': gwo_time
             })
             progress_bar.progress(100)
             
             status_text.text("Training complete!")
             st.session_state['results'] = results
-            st.session_state['ann_model'] = ann_model
             st.session_state['pso_model'] = pso_model
-            st.session_state['ga_model'] = ga_model
-            st.session_state['gwo_model'] = gwo_model
             st.session_state['scaler'] = scaler
             st.session_state['label_encoder'] = label_encoder
-            st.session_state['feature_names'] = feature_names
             
             st.success("✅ All models trained successfully!")
-            
-            # Show classification report
-            st.subheader("📋 Classification Report (Best Model)")
-            best_idx = np.argmax([r['Accuracy'] for r in results])
-            best_model_name = results[best_idx]['Method']
-            
-            if best_model_name == 'ANN (Baseline)':
-                best_model = ann_model
-            elif best_model_name == 'ANN-PSO':
-                best_model = pso_model
-            elif best_model_name == 'ANN-GA':
-                best_model = ga_model
-            else:
-                best_model = gwo_model
-            
-            y_pred_best = best_model.predict(X_test)
-            report = classification_report(y_test, y_pred_best, target_names=label_encoder.classes_, output_dict=True)
-            report_df = pd.DataFrame(report).transpose()
-            st.dataframe(report_df.round(3), use_container_width=True)
     
     # ===============================
     # RESULTS VISUALIZATION
@@ -706,27 +621,20 @@ if uploaded_file is not None:
     # PREDICTION SECTION WITH RANGE VALIDATION
     # ===============================
     
-    if 'ann_model' in st.session_state:
+    if 'pso_model' in st.session_state:
         st.header("🔮 Step 5: Make a Prediction")
         
         st.markdown("### Enter 15 Morphometric Measurements")
         
-        feature_names = st.session_state['feature_names']
-        scaler = st.session_state['scaler']
-        label_encoder = st.session_state['label_encoder']
-        
-        # KEY DIFFERENTIATOR HIGHLIGHT
         st.info("""
         💡 **Key Differentiators for Accurate Identification:**
         - **Moolgarda tade** has HIGHER NP (15-17) and ND2_Total (8-9)
         - **Planiliza subviridis** and **Moolgarda tade** are LARGER (SL > 250mm)
-        - **Moolgarda seheli**, **Osteomugil perusii**, **Ellochelon vaigiensis** are SMALLER (SL < 200mm)
+        - Other species are SMALLER (SL < 200mm)
         """)
         
-        # Reference Table with Ranges
+        # Reference Table
         with st.expander("📖 SPECIES MEASUREMENT RANGES", expanded=True):
-            
-            # Create a formatted table
             range_table_data = []
             for species in SPECIES_RANGES.keys():
                 row = {
@@ -737,26 +645,74 @@ if uploaded_file is not None:
                     "SL (mm)": f"{SPECIES_RANGES[species]['SL'][0]:.0f}-{SPECIES_RANGES[species]['SL'][1]:.0f}"
                 }
                 range_table_data.append(row)
-            
             range_df = pd.DataFrame(range_table_data)
             st.dataframe(range_df, use_container_width=True)
-            
-            st.caption("ℹ️ Measurements outside these ranges may be flagged as warnings")
         
         # Quick select buttons
-        st.subheader("Quick Select - Test with Reference Values")
+        st.subheader("Quick Select - Load Reference Values")
         col_b1, col_b2, col_b3, col_b4, col_b5 = st.columns(5)
         
-        def get_ref_vals(species):
+        def set_reference_values(species):
             ranges = SPECIES_RANGES[species]
-            return (
-                ranges["ND1_Total"][0], 
-                (ranges["ND2_Total"][0] + ranges["ND2_Total"][1]) // 2,
-                (ranges["NP"][0] + ranges["NP"][1]) // 2,
-                (ranges["NC"][0] + ranges["NC"][1]) // 2,
-                (ranges["NV_Total"][0] + ranges["NV_Total"][1]) // 2,
-                (ranges["NA_Total"][0] + ranges["NA_Total"][1]) // 2,
-                (ranges["SL"][0] + ranges["SL"][1]) // 2,
-                (ranges["PL"][0] + ranges["PL"][1]) // 2,
-                (ranges["BH"][0] + ranges["BH"][1]) // 2,
-                (ranges["
+            st.session_state['ref_values'] = {
+                "ND1_Total": ranges["ND1_Total"][0],
+                "ND2_Total": (ranges["ND2_Total"][0] + ranges["ND2_Total"][1]) // 2,
+                "NP": (ranges["NP"][0] + ranges["NP"][1]) // 2,
+                "NC": (ranges["NC"][0] + ranges["NC"][1]) // 2,
+                "NV_Total": (ranges["NV_Total"][0] + ranges["NV_Total"][1]) // 2,
+                "NA_Total": (ranges["NA_Total"][0] + ranges["NA_Total"][1]) // 2,
+                "SL": (ranges["SL"][0] + ranges["SL"][1]) / 2,
+                "PL": (ranges["PL"][0] + ranges["PL"][1]) / 2,
+                "BH": (ranges["BH"][0] + ranges["BH"][1]) / 2,
+                "HL": (ranges["HL"][0] + ranges["HL"][1]) / 2,
+                "Head_Truss": (ranges["Head_Truss"][0] + ranges["Head_Truss"][1]) / 2,
+                "Anterior_Truss": (ranges["Anterior_Truss"][0] + ranges["Anterior_Truss"][1]) / 2,
+                "Mid_Truss": (ranges["Mid_Truss"][0] + ranges["Mid_Truss"][1]) / 2,
+                "Posterior_Truss": (ranges["Posterior_Truss"][0] + ranges["Posterior_Truss"][1]) / 2,
+                "Tail_Truss": (ranges["Tail_Truss"][0] + ranges["Tail_Truss"][1]) / 2
+            }
+        
+        if col_b1.button("📌 Planiliza"):
+            set_reference_values("Planiliza subviridis")
+        if col_b2.button("📌 Moolgarda s"):
+            set_reference_values("Moolgarda seheli")
+        if col_b3.button("📌 Osteomugil"):
+            set_reference_values("Osteomugil perusii")
+        if col_b4.button("📌 Moolgarda t"):
+            set_reference_values("Moolgarda tade")
+        if col_b5.button("📌 Ellochelon"):
+            set_reference_values("Ellochelon vaigiensis")
+        
+        # Get default values
+        if 'ref_values' in st.session_state:
+            ref = st.session_state['ref_values']
+        else:
+            ref = {
+                "ND1_Total": 4, "ND2_Total": 7, "NP": 14, "NC": 14, "NV_Total": 6, "NA_Total": 10,
+                "SL": 150, "PL": 35, "BH": 40, "HL": 35, "Head_Truss": 80, "Anterior_Truss": 70,
+                "Mid_Truss": 200, "Posterior_Truss": 200, "Tail_Truss": 200
+            }
+        
+        # Input form
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Meristic Features")
+            nd1 = st.number_input("ND1_Total", value=float(ref["ND1_Total"]), step=1.0)
+            nd2 = st.number_input("ND2_Total", value=float(ref["ND2_Total"]), step=1.0, help="KEY DIFFERENTIATOR")
+            np_val = st.number_input("NP", value=float(ref["NP"]), step=1.0, help="KEY DIFFERENTIATOR")
+            nc = st.number_input("NC", value=float(ref["NC"]), step=1.0)
+            nv = st.number_input("NV_Total", value=float(ref["NV_Total"]), step=1.0)
+            na = st.number_input("NA_Total", value=float(ref["NA_Total"]), step=1.0)
+        
+        with col2:
+            st.subheader("Morphometric Features (mm)")
+            sl = st.number_input("SL", value=float(ref["SL"]), step=10.0, help="KEY DIFFERENTIATOR")
+            pl = st.number_input("PL", value=float(ref["PL"]), step=5.0)
+            bh = st.number_input("BH", value=float(ref["BH"]), step=5.0)
+            hl = st.number_input("HL", value=float(ref["HL"]), step=5.0)
+            
+            st.subheader("Truss Features (mm)")
+            head = st.number_input("Head_Truss", value=float(ref["Head_Truss"]), step=10.0)
+            ant = st.number_input("Anterior_Truss", value=float(ref["Anterior_Truss"]), step=10.0)
+            mid = st.number_input("Mid_Truss", value=float(ref["Mid_Truss"]), step=
