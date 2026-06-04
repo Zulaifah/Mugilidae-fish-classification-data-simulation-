@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# DENGAN PSO, GA, GWO YANG BETUL
+# IMPROVED: More Iterations for PSO/GA/GWO
 # ===============================
 
 import streamlit as st
@@ -108,12 +108,16 @@ species_names = [
 st.sidebar.title("🐟 Mugilidae Fish Classifier")
 st.sidebar.markdown("---")
 
-# Training Parameters
-st.sidebar.subheader("⚙️ Optimization Parameters")
-n_particles = st.sidebar.slider("Number of Particles (PSO)", 10, 50, 20, 5)
-n_generations = st.sidebar.slider("Generations (GA)", 10, 50, 20, 5)
-n_wolves = st.sidebar.slider("Number of Wolves (GWO)", 10, 50, 20, 5)
-n_iterations = st.sidebar.slider("Iterations (PSO/GWO)", 20, 100, 40, 10)
+# Training Parameters - HIGHER VALUES
+st.sidebar.subheader("⚙️ Optimization Parameters (Higher = Better but Slower)")
+
+n_particles = st.sidebar.slider("Number of Particles (PSO)", 20, 80, 40, 10)
+n_generations = st.sidebar.slider("Generations (GA)", 20, 80, 40, 10)
+n_wolves = st.sidebar.slider("Number of Wolves (GWO)", 20, 80, 40, 10)
+n_iterations = st.sidebar.slider("Iterations (PSO/GWO)", 40, 150, 80, 10)
+
+st.sidebar.markdown("---")
+st.sidebar.warning("⏱️ **Warning:** Higher values = 15-30 minutes training time!")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📋 About")
@@ -124,7 +128,9 @@ st.sidebar.info("""
 - ANN-GA (Genetic Algorithm)
 - ANN-GWO (Grey Wolf Optimizer)
 
-**Note:** Training may take 5-15 minutes
+**Recommended Settings:**
+- Particles/Wolves: 40-50
+- Generations/Iterations: 80-100
 """)
 
 st.sidebar.caption("FYP Project | UMT")
@@ -293,7 +299,8 @@ if uploaded_file is not None:
     
     if 'balanced_df' in st.session_state:
         st.header("🤖 Step 3: Train Models")
-        st.warning("⏱️ **Training may take 5-15 minutes. Please wait...**")
+        st.warning(f"⏱️ **Training may take 15-30 minutes with current settings!**")
+        st.info(f"📊 Settings: PSO/GA/GWO with {n_particles} population, {n_iterations} iterations")
         
         final_df = st.session_state['balanced_df']
         
@@ -317,19 +324,19 @@ if uploaded_file is not None:
         with col2:
             st.metric("Test Samples", len(X_test))
         
-        if st.button("🚀 Train All Models (Real Optimization)", type="primary"):
+        if st.button("🚀 Train All Models (High Quality)", type="primary"):
             
             results = []
             progress_bar = st.progress(0)
             status = st.empty()
             
             # ==========================================================
-            # 1. ANN BASELINE (Grid Search untuk architecture terbaik)
+            # 1. ANN BASELINE (Grid Search)
             # ==========================================================
             status.text("Training ANN Baseline (Grid Search)...")
             start = time.time()
             
-            arch_options = [(8,4), (10,5), (12,6), (15,8), (20,10)]
+            arch_options = [(8,4), (10,5), (12,6), (15,8), (20,10), (25,12)]
             best_ann_acc = 0
             best_ann = None
             best_ann_arch = (10,5)
@@ -350,36 +357,33 @@ if uploaded_file is not None:
             progress_bar.progress(10)
             
             # ==========================================================
-            # 2. REAL PSO (Particle Swarm Optimization)
+            # 2. REAL PSO (Higher iterations)
             # ==========================================================
-            status.text(f"Training REAL PSO ({n_particles} particles, {n_iterations} iterations)...")
+            status.text(f"Training PSO ({n_particles} particles, {n_iterations} iterations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED)
             
-            # Bounds for parameters: [h1_min, h1_max], [h2_min, h2_max], [alpha_min, alpha_max], [lr_min, lr_max]
             bounds = np.array([
-                [4, 25],      # h1
-                [2, 15],      # h2
-                [0.0001, 0.01],  # alpha
-                [0.0001, 0.005]  # learning rate
+                [4, 30],      # h1 (wider range)
+                [2, 20],      # h2 (wider range)
+                [0.0001, 0.05],  # alpha (wider)
+                [0.0001, 0.01]   # learning rate (wider)
             ])
             
-            # Initialize particles
             particles = [Particle(bounds) for _ in range(n_particles)]
             global_best_position = particles[0].position.copy()
             global_best_score = -float('inf')
             
-            # Evaluation function
             def evaluate_particle(position):
                 h1, h2 = int(position[0]), int(position[1])
-                h1 = max(2, min(h1, 30))
-                h2 = max(1, min(h2, 20))
-                alpha = position[2]
-                lr = position[3]
+                h1 = max(2, min(h1, 35))
+                h2 = max(1, min(h2, 25))
+                alpha = max(0.00001, min(position[2], 0.1))
+                lr = max(0.00001, min(position[3], 0.02))
                 
                 model = MLPClassifier(
                     hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=200, random_state=RANDOM_SEED, early_stopping=True
+                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
                 )
                 try:
                     scores = cross_val_score(model, X_train, y_train, cv=3)
@@ -387,7 +391,6 @@ if uploaded_file is not None:
                 except:
                     return 0
             
-            # Initial evaluation
             for particle in particles:
                 score = evaluate_particle(particle.position)
                 if score > particle.best_score:
@@ -397,36 +400,30 @@ if uploaded_file is not None:
                     global_best_score = score
                     global_best_position = particle.position.copy()
             
-            # PSO main loop
             for it in range(n_iterations):
                 w = 0.9 - (0.9 - 0.4) * (it / n_iterations)
                 
                 for particle in particles:
                     particle.update_velocity(global_best_position, w=w)
                     particle.update_position(bounds)
-                    
                     score = evaluate_particle(particle.position)
                     
                     if score > particle.best_score:
                         particle.best_score = score
                         particle.best_position = particle.position.copy()
-                        
                         if score > global_best_score:
                             global_best_score = score
                             global_best_position = particle.position.copy()
                 
-                if (it + 1) % 10 == 0:
-                    status.text(f"PSO: Iteration {it+1}/{n_iterations}, Best: {global_best_score:.4f}")
+                if (it + 1) % 20 == 0:
+                    status.text(f"PSO: Iter {it+1}/{n_iterations}, Best: {global_best_score:.4f}")
             
-            # Train final PSO model
             best_h1 = int(global_best_position[0])
             best_h2 = int(global_best_position[1])
-            best_alpha = global_best_position[2]
-            best_lr = global_best_position[3]
-            
             pso_model = MLPClassifier(
-                hidden_layer_sizes=(best_h1, best_h2), alpha=best_alpha, learning_rate_init=best_lr,
-                max_iter=500, random_state=RANDOM_SEED, early_stopping=True
+                hidden_layer_sizes=(best_h1, best_h2), alpha=global_best_position[2], 
+                learning_rate_init=global_best_position[3], max_iter=500, 
+                random_state=RANDOM_SEED, early_stopping=True
             )
             pso_model.fit(X_train, y_train)
             pso_acc = accuracy_score(y_test, pso_model.predict(X_test))
@@ -435,34 +432,33 @@ if uploaded_file is not None:
             progress_bar.progress(40)
             
             # ==========================================================
-            # 3. REAL GA (Genetic Algorithm)
+            # 3. REAL GA (Higher generations)
             # ==========================================================
-            status.text(f"Training REAL GA ({n_generations} generations)...")
+            status.text(f"Training GA ({n_generations} generations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED + 1)
             
-            # Population initialization
-            population_size = 30
+            population_size = n_particles
             population = []
             for _ in range(population_size):
                 individual = [
-                    np.random.randint(4, 25),   # h1
-                    np.random.randint(2, 15),   # h2
-                    np.random.uniform(0.0001, 0.01),  # alpha
-                    np.random.uniform(0.0001, 0.005)   # lr
+                    np.random.randint(4, 30),
+                    np.random.randint(2, 20),
+                    np.random.uniform(0.0001, 0.05),
+                    np.random.uniform(0.0001, 0.01)
                 ]
                 population.append(individual)
             
             def evaluate_ga(individual):
                 h1, h2 = individual[0], individual[1]
-                h1 = max(2, min(h1, 30))
-                h2 = max(1, min(h2, 20))
+                h1 = max(2, min(h1, 35))
+                h2 = max(1, min(h2, 25))
                 alpha = individual[2]
                 lr = individual[3]
                 
                 model = MLPClassifier(
                     hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=200, random_state=RANDOM_SEED, early_stopping=True
+                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
                 )
                 try:
                     scores = cross_val_score(model, X_train, y_train, cv=3)
@@ -470,13 +466,12 @@ if uploaded_file is not None:
                 except:
                     return 0
             
-            # Evaluate initial population
             fitness = [evaluate_ga(ind) for ind in population]
             
             for gen in range(n_generations):
-                # Selection (tournament)
                 new_population = []
                 for _ in range(population_size):
+                    # Tournament selection
                     idx1, idx2 = np.random.choice(population_size, 2, replace=False)
                     parent1 = population[idx1] if fitness[idx1] > fitness[idx2] else population[idx2]
                     idx1, idx2 = np.random.choice(population_size, 2, replace=False)
@@ -492,35 +487,34 @@ if uploaded_file is not None:
                     
                     # Mutation
                     for j in range(4):
-                        if np.random.random() < 0.1:
+                        if np.random.random() < 0.15:
                             if j == 0:
-                                child[j] += np.random.randint(-2, 3)
-                                child[j] = np.clip(child[j], 4, 25)
+                                child[j] += np.random.randint(-3, 4)
+                                child[j] = np.clip(child[j], 4, 30)
                             elif j == 1:
                                 child[j] += np.random.randint(-2, 3)
-                                child[j] = np.clip(child[j], 2, 15)
+                                child[j] = np.clip(child[j], 2, 20)
                             else:
-                                child[j] += np.random.normal(0, 0.0005)
+                                child[j] += np.random.normal(0, 0.001)
                                 if j == 2:
-                                    child[j] = np.clip(child[j], 0.0001, 0.01)
+                                    child[j] = np.clip(child[j], 0.0001, 0.05)
                                 else:
-                                    child[j] = np.clip(child[j], 0.0001, 0.005)
+                                    child[j] = np.clip(child[j], 0.0001, 0.01)
                     
                     new_population.append(child)
                 
                 population = new_population
                 fitness = [evaluate_ga(ind) for ind in population]
                 
-                if (gen + 1) % 5 == 0:
+                if (gen + 1) % 10 == 0:
                     best_fitness = max(fitness)
-                    status.text(f"GA: Generation {gen+1}/{n_generations}, Best: {best_fitness:.4f}")
+                    status.text(f"GA: Gen {gen+1}/{n_generations}, Best: {best_fitness:.4f}")
             
-            # Get best individual
             best_idx = np.argmax(fitness)
             best_ga = population[best_idx]
             ga_model = MLPClassifier(
-                hidden_layer_sizes=(best_ga[0], best_ga[1]), alpha=best_ga[2], learning_rate_init=best_ga[3],
-                max_iter=500, random_state=RANDOM_SEED, early_stopping=True
+                hidden_layer_sizes=(best_ga[0], best_ga[1]), alpha=best_ga[2], 
+                learning_rate_init=best_ga[3], max_iter=500, random_state=RANDOM_SEED, early_stopping=True
             )
             ga_model.fit(X_train, y_train)
             ga_acc = accuracy_score(y_test, ga_model.predict(X_test))
@@ -529,16 +523,15 @@ if uploaded_file is not None:
             progress_bar.progress(70)
             
             # ==========================================================
-            # 4. REAL GWO (Grey Wolf Optimizer)
+            # 4. REAL GWO (Higher iterations)
             # ==========================================================
-            status.text(f"Training REAL GWO ({n_wolves} wolves, {n_iterations} iterations)...")
+            status.text(f"Training GWO ({n_wolves} wolves, {n_iterations} iterations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED + 2)
             
-            # Initialize wolves
             wolves = np.random.uniform(
                 low=[4, 2, 0.0001, 0.0001],
-                high=[25, 15, 0.01, 0.005],
+                high=[30, 20, 0.05, 0.01],
                 size=(n_wolves, 4)
             )
             
@@ -551,14 +544,14 @@ if uploaded_file is not None:
             
             def evaluate_gwo(wolf):
                 h1, h2 = int(wolf[0]), int(wolf[1])
-                h1 = max(2, min(h1, 30))
-                h2 = max(1, min(h2, 20))
+                h1 = max(2, min(h1, 35))
+                h2 = max(1, min(h2, 25))
                 alpha = wolf[2]
                 lr = wolf[3]
                 
                 model = MLPClassifier(
                     hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=200, random_state=RANDOM_SEED, early_stopping=True
+                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
                 )
                 try:
                     scores = cross_val_score(model, X_train, y_train, cv=3)
@@ -566,7 +559,6 @@ if uploaded_file is not None:
                 except:
                     return 0
             
-            # Initial evaluation
             for i, wolf in enumerate(wolves):
                 fitness = evaluate_gwo(wolf)
                 if fitness > alpha_score:
@@ -604,7 +596,7 @@ if uploaded_file is not None:
                         
                         wolves[i, j] = (X1 + X2 + X3) / 3
                     
-                    wolves[i] = np.clip(wolves[i], [4, 2, 0.0001, 0.0001], [25, 15, 0.01, 0.005])
+                    wolves[i] = np.clip(wolves[i], [4, 2, 0.0001, 0.0001], [30, 20, 0.05, 0.01])
                     fitness = evaluate_gwo(wolves[i])
                     
                     if fitness > alpha_score:
@@ -617,14 +609,14 @@ if uploaded_file is not None:
                         delta_score = fitness
                         delta_pos = wolves[i].copy()
                 
-                if (it + 1) % 10 == 0:
-                    status.text(f"GWO: Iteration {it+1}/{n_iterations}, Best: {alpha_score:.4f}")
+                if (it + 1) % 20 == 0:
+                    status.text(f"GWO: Iter {it+1}/{n_iterations}, Best: {alpha_score:.4f}")
             
             best_gwo_h1 = int(alpha_pos[0])
             best_gwo_h2 = int(alpha_pos[1])
             gwo_model = MLPClassifier(
-                hidden_layer_sizes=(best_gwo_h1, best_gwo_h2), alpha=alpha_pos[2], learning_rate_init=alpha_pos[3],
-                max_iter=500, random_state=RANDOM_SEED, early_stopping=True
+                hidden_layer_sizes=(best_gwo_h1, best_gwo_h2), alpha=alpha_pos[2], 
+                learning_rate_init=alpha_pos[3], max_iter=500, random_state=RANDOM_SEED, early_stopping=True
             )
             gwo_model.fit(X_train, y_train)
             gwo_acc = accuracy_score(y_test, gwo_model.predict(X_test))
@@ -653,7 +645,6 @@ if uploaded_file is not None:
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
         
-        # Find best method
         best_idx = res_df['Accuracy'].argmax()
         best_method = res_df.iloc[best_idx]['Method']
         best_acc = res_df.iloc[best_idx]['Accuracy']
@@ -691,7 +682,7 @@ if uploaded_file is not None:
             plt.tight_layout()
             st.pyplot(fig)
         
-        # Confusion Matrix - Best Model
+        # Confusion Matrix
         st.subheader("📊 Confusion Matrix (Best Model)")
         
         X_test = st.session_state['X_test']
@@ -701,7 +692,7 @@ if uploaded_file is not None:
         if "PSO" in best_method:
             best_model = st.session_state['pso_model']
         else:
-            best_model = st.session_state['pso_model']  # Fallback
+            best_model = st.session_state['pso_model']
         
         y_pred_best = best_model.predict(X_test)
         
@@ -716,25 +707,6 @@ if uploaded_file is not None:
         ax.set_ylabel('Actual')
         plt.tight_layout()
         st.pyplot(fig)
-        
-        # Per-species accuracy
-        st.subheader("📋 Per-Species Classification Accuracy")
-        
-        species_accuracy = []
-        for i, sp in enumerate(label_encoder.classes_):
-            mask = y_test == i
-            if mask.sum() > 0:
-                correct = (y_pred_best[mask] == i).sum()
-                total = mask.sum()
-                acc = correct / total
-                species_accuracy.append({
-                    'Species': sp,
-                    'Test Samples': total,
-                    'Correct': correct,
-                    'Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
-                })
-        
-        st.dataframe(pd.DataFrame(species_accuracy), use_container_width=True)
 
 else:
     st.info("👈 Please upload your Excel file to begin")
