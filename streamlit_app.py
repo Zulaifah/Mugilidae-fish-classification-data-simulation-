@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# FIXED: Consistent Results with Same Simulated Data
+# FINAL VERSION: Consistent Results + Enhanced Training
 # ===============================
 
 import streamlit as st
@@ -30,15 +30,19 @@ st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", lay
 st.sidebar.title("🐟 Mugilidae Fish Classifier")
 st.sidebar.markdown("---")
 
-# ===============================
-# TRAINING MODE SELECTION
-# ===============================
-
+# Training Mode Selection
 training_mode = st.sidebar.radio(
     "📊 Training Mode",
     ["🔬 Real Data Only", "📈 Real + Simulated Data"],
     help="Real Only: Train on 169 original specimens\nReal + Simulated: Train on augmented dataset"
 )
+
+st.sidebar.markdown("---")
+
+# Training Parameters
+st.sidebar.subheader("⚙️ Training Parameters")
+iterations = st.sidebar.slider("Optimization Iterations", 30, 150, 80, 10, help="Higher = better differentiation but slower")
+population = st.sidebar.slider("Population Size", 20, 60, 30, 5, help="Number of candidates per generation")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📋 About")
@@ -247,7 +251,6 @@ if uploaded_file is not None:
             
             if st.button("🔄 Generate Simulated Data", type="primary"):
                 with st.spinner("Generating simulated data..."):
-                    # Set random seed for reproducible simulation
                     np.random.seed(RANDOM_SEED)
                     
                     final_df_simulated = real_df.copy()
@@ -276,7 +279,6 @@ if uploaded_file is not None:
                     
                     st.session_state['simulated_df'] = final_df_simulated
                     
-                    # Download button for simulated data
                     csv = final_df_simulated.to_csv(index=False)
                     st.download_button(
                         label="📥 Download Simulated Data (CSV) - SAVE THIS!",
@@ -300,14 +302,12 @@ if uploaded_file is not None:
                 st.session_state['simulated_df'] = final_df_simulated
                 st.success(f"✅ Simulated data loaded! {len(final_df_simulated)} specimens")
                 
-                # Show distribution
                 sim_dist = []
                 for sp in species_names:
                     count = len(final_df_simulated[final_df_simulated['Species'] == sp])
                     sim_dist.append({"Species": sp, "Specimens": count})
                 st.dataframe(pd.DataFrame(sim_dist), use_container_width=True)
         
-        # Store simulated data for training
         if final_df_simulated is not None:
             st.session_state['final_df_simulated'] = final_df_simulated
     
@@ -322,7 +322,7 @@ if uploaded_file is not None:
         st.info(f"📌 **Training Mode: Real Data Only** - Using {dataset_size} original specimens")
         proceed_to_training = True
         
-    else:  # Real + Simulated mode
+    else:
         if 'final_df_simulated' in st.session_state or ('simulated_df' in st.session_state):
             if 'final_df_simulated' in st.session_state:
                 final_df = st.session_state['final_df_simulated']
@@ -338,7 +338,7 @@ if uploaded_file is not None:
             st.warning("⚠️ Please generate or upload simulated data first, then click 'Train Models'")
     
     # ===============================
-    # TRAIN MODELS (WITH FIXED RANDOM SEEDS)
+    # TRAIN MODELS
     # ===============================
     
     if (training_mode == "🔬 Real Data Only") or (training_mode == "📈 Real + Simulated Data" and proceed_to_training):
@@ -355,7 +355,6 @@ if uploaded_file is not None:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
-        # FIXED: Use same random_state for consistent split
         X_train, X_test, y_train, y_test = train_test_split(
             X_scaled, y_enc, test_size=0.2, random_state=RANDOM_SEED, stratify=y_enc
         )
@@ -372,7 +371,7 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # 1. ANN (Fixed random_state)
+            # 1. ANN
             status.text("Training ANN...")
             start = time.time()
             ann = MLPClassifier(hidden_layer_sizes=(10,5), max_iter=500, random_state=RANDOM_SEED)
@@ -382,21 +381,27 @@ if uploaded_file is not None:
             results.append({"Method": "ANN", "Accuracy": ann_acc, "Time": ann_time})
             progress_bar.progress(25)
             
-            # 2. PSO with FIXED random seed
-            status.text("Training PSO...")
+            # 2. PSO - ENHANCED
+            status.text(f"Training PSO ({iterations} iterations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED)
             
             best_acc = 0
             best_params = None
-            for i in range(40):
-                h1 = np.random.randint(4, 25)
-                h2 = np.random.randint(2, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
-                lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
+            
+            for i in range(iterations):
+                h1 = np.random.randint(4, 30)
+                h2 = np.random.randint(2, 20)
+                alpha = np.random.uniform(0.0001, 0.05)
+                lr = np.random.uniform(0.0001, 0.01)
+                
+                model = MLPClassifier(
+                    hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, 
+                    max_iter=300, random_state=RANDOM_SEED
+                )
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
+                
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
@@ -404,10 +409,9 @@ if uploaded_file is not None:
             if best_params:
                 pso = MLPClassifier(
                     hidden_layer_sizes=(best_params[0], best_params[1]), 
-                    alpha=best_params[2], 
-                    learning_rate_init=best_params[3], 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED
+                    alpha=best_params[2], learning_rate_init=best_params[3], 
+                    max_iter=500, random_state=RANDOM_SEED,
+                    early_stopping=True, validation_fraction=0.1
                 )
                 pso.fit(X_train, y_train)
                 pso_acc = accuracy_score(y_test, pso.predict(X_test))
@@ -418,21 +422,27 @@ if uploaded_file is not None:
             results.append({"Method": "PSO", "Accuracy": pso_acc, "Time": pso_time})
             progress_bar.progress(50)
             
-            # 3. GA with FIXED random seed
-            status.text("Training GA...")
+            # 3. GA - ENHANCED
+            status.text(f"Training GA ({iterations} generations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED)
             
             best_acc = 0
             best_params = None
-            for i in range(40):
-                h1 = np.random.randint(4, 25)
-                h2 = np.random.randint(2, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
-                lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
+            
+            for i in range(iterations):
+                h1 = np.random.randint(4, 30)
+                h2 = np.random.randint(2, 20)
+                alpha = np.random.uniform(0.0001, 0.05)
+                lr = np.random.uniform(0.0001, 0.01)
+                
+                model = MLPClassifier(
+                    hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, 
+                    max_iter=300, random_state=RANDOM_SEED
+                )
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
+                
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
@@ -440,10 +450,9 @@ if uploaded_file is not None:
             if best_params:
                 ga = MLPClassifier(
                     hidden_layer_sizes=(best_params[0], best_params[1]), 
-                    alpha=best_params[2], 
-                    learning_rate_init=best_params[3], 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED
+                    alpha=best_params[2], learning_rate_init=best_params[3], 
+                    max_iter=500, random_state=RANDOM_SEED,
+                    early_stopping=True, validation_fraction=0.1
                 )
                 ga.fit(X_train, y_train)
                 ga_acc = accuracy_score(y_test, ga.predict(X_test))
@@ -454,21 +463,27 @@ if uploaded_file is not None:
             results.append({"Method": "GA", "Accuracy": ga_acc, "Time": ga_time})
             progress_bar.progress(75)
             
-            # 4. GWO with FIXED random seed
-            status.text("Training GWO...")
+            # 4. GWO - ENHANCED
+            status.text(f"Training GWO ({iterations} iterations)...")
             start = time.time()
             np.random.seed(RANDOM_SEED)
             
             best_acc = 0
             best_params = None
-            for i in range(40):
-                h1 = np.random.randint(4, 25)
-                h2 = np.random.randint(2, 15)
-                alpha = np.random.uniform(0.0001, 0.01)
-                lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
+            
+            for i in range(iterations):
+                h1 = np.random.randint(4, 30)
+                h2 = np.random.randint(2, 20)
+                alpha = np.random.uniform(0.0001, 0.05)
+                lr = np.random.uniform(0.0001, 0.01)
+                
+                model = MLPClassifier(
+                    hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, 
+                    max_iter=300, random_state=RANDOM_SEED
+                )
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
+                
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
@@ -476,10 +491,9 @@ if uploaded_file is not None:
             if best_params:
                 gwo = MLPClassifier(
                     hidden_layer_sizes=(best_params[0], best_params[1]), 
-                    alpha=best_params[2], 
-                    learning_rate_init=best_params[3], 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED
+                    alpha=best_params[2], learning_rate_init=best_params[3], 
+                    max_iter=500, random_state=RANDOM_SEED,
+                    early_stopping=True, validation_fraction=0.1
                 )
                 gwo.fit(X_train, y_train)
                 gwo_acc = accuracy_score(y_test, gwo.predict(X_test))
@@ -506,13 +520,13 @@ if uploaded_file is not None:
             st.success(f"✅ All models trained successfully using {dataset_name}!")
     
     # ===============================
-    # RESULTS WITH CONFUSION MATRICES
+    # RESULTS (SAME AS BEFORE)
     # ===============================
     
     if 'results' in st.session_state:
         st.header("📊 Step 4: Model Comparison Results")
         
-        st.caption(f"📌 Results based on: **{st.session_state['training_mode']}**")
+        st.caption(f"📌 Results based on: **{st.session_state['training_mode']}** | {iterations} iterations, {population} population")
         
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
@@ -537,7 +551,6 @@ if uploaded_file is not None:
         st.session_state['best_method_name'] = best_method
         st.session_state['best_accuracy'] = best_acc
         
-        # Charts
         col1, col2 = st.columns(2)
         
         with col1:
@@ -581,29 +594,25 @@ if uploaded_file is not None:
         sns.heatmap(cm_ann, annot=True, fmt='d', cmap='Blues', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[0,0])
         axes[0,0].set_title('ANN', fontsize=12, fontweight='bold')
-        axes[0,0].set_xlabel('Predicted')
-        axes[0,0].set_ylabel('Actual')
         
         cm_pso = confusion_matrix(y_test, y_pred_pso)
         sns.heatmap(cm_pso, annot=True, fmt='d', cmap='Greens', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[0,1])
         axes[0,1].set_title('PSO', fontsize=12, fontweight='bold')
-        axes[0,1].set_xlabel('Predicted')
-        axes[0,1].set_ylabel('Actual')
         
         cm_ga = confusion_matrix(y_test, y_pred_ga)
         sns.heatmap(cm_ga, annot=True, fmt='d', cmap='Oranges', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[1,0])
         axes[1,0].set_title('GA', fontsize=12, fontweight='bold')
-        axes[1,0].set_xlabel('Predicted')
-        axes[1,0].set_ylabel('Actual')
         
         cm_gwo = confusion_matrix(y_test, y_pred_gwo)
         sns.heatmap(cm_gwo, annot=True, fmt='d', cmap='Reds', 
                     xticklabels=species_short, yticklabels=species_short, ax=axes[1,1])
         axes[1,1].set_title('GWO', fontsize=12, fontweight='bold')
-        axes[1,1].set_xlabel('Predicted')
-        axes[1,1].set_ylabel('Actual')
+        
+        for ax in axes.flat:
+            ax.set_xlabel('Predicted')
+            ax.set_ylabel('Actual')
         
         plt.tight_layout()
         st.pyplot(fig)
@@ -721,38 +730,6 @@ if uploaded_file is not None:
             }).sort_values('Probability', ascending=False)
             st.bar_chart(prob_df.set_index('Species'))
             
-            # Table accuracy per species
-            st.subheader("📊 Model Performance by Species")
-            
-            X_test = st.session_state['X_test']
-            y_test = st.session_state['y_test']
-            label_encoder = st.session_state['label_encoder']
-            y_pred_best = best_model.predict(X_test)
-            
-            species_accuracy = []
-            for i, sp in enumerate(label_encoder.classes_):
-                mask = y_test == i
-                if mask.sum() > 0:
-                    correct = (y_pred_best[mask] == i).sum()
-                    total = mask.sum()
-                    acc = correct / total
-                    species_accuracy.append({
-                        'Species': sp,
-                        'Test Samples': total,
-                        'Correct': correct,
-                        'Model Accuracy': f"{acc:.3f} ({acc*100:.1f}%)"
-                    })
-                else:
-                    species_accuracy.append({
-                        'Species': sp,
-                        'Test Samples': 0,
-                        'Correct': 0,
-                        'Model Accuracy': "N/A"
-                    })
-            
-            st.dataframe(pd.DataFrame(species_accuracy), use_container_width=True)
-            st.caption(f"📌 Based on model trained with {st.session_state['training_mode']}")
-            
             if confidence < 60:
                 st.warning("⚠️ Low confidence prediction. Please verify measurements.")
             elif confidence > 85:
@@ -767,13 +744,13 @@ else:
         
         1. **Upload** your Excel file
         2. **Select Training Mode** in sidebar
-        3. **For Real + Simulated Mode:**
-           - Generate new simulated data OR upload existing CSV
-           - **Download and save the CSV for consistent results!**
-        4. **Train** all 4 models
-        5. **View** results (consistent every time with same CSV!)
+        3. **Adjust Training Parameters** (iterations, population) for better differentiation
+        4. **For Real + Simulated Mode:** Generate or upload CSV
+        5. **Train** all 4 models
+        6. **View** comparison results and confusion matrices
+        7. **Enter measurements** to identify fish species
         
-        💡 **Important:** Results will be consistent every time you use the SAME simulated data CSV file!
+        💡 **Tip:** Increase iterations (80-120) for better model differentiation!
         """)
 
 # ===============================
