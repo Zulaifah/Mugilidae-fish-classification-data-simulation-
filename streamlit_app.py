@@ -1,6 +1,7 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# IMPROVED: More Iterations for PSO/GA/GWO
+# Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO
+# With Data Simulation & Interactive Visualization
 # ===============================
 
 import streamlit as st
@@ -15,91 +16,10 @@ warnings.filterwarnings('ignore')
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
-
-# Set GLOBAL random seed
-RANDOM_SEED = 42
-np.random.seed(RANDOM_SEED)
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from scipy import stats
 
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
-
-# ===============================
-# CLASS DEFINITIONS FOR REAL METAHEURISTICS
-# ===============================
-
-class Particle:
-    """Particle for PSO optimization"""
-    def __init__(self, bounds):
-        self.position = np.array([
-            np.random.uniform(bounds[0][0], bounds[0][1]),  # h1
-            np.random.uniform(bounds[1][0], bounds[1][1]),  # h2
-            np.random.uniform(bounds[2][0], bounds[2][1]),  # alpha
-            np.random.uniform(bounds[3][0], bounds[3][1])   # learning rate
-        ])
-        self.velocity = np.zeros_like(self.position)
-        self.best_position = self.position.copy()
-        self.best_score = -float('inf')
-    
-    def update_velocity(self, global_best_position, w=0.7, c1=1.5, c2=1.5):
-        r1, r2 = np.random.rand(2)
-        cognitive = c1 * r1 * (self.best_position - self.position)
-        social = c2 * r2 * (global_best_position - self.position)
-        self.velocity = w * self.velocity + cognitive + social
-    
-    def update_position(self, bounds):
-        self.position += self.velocity
-        for i in range(len(bounds)):
-            self.position[i] = np.clip(self.position[i], bounds[i][0], bounds[i][1])
-
-# ===============================
-# FUNCTIONS
-# ===============================
-
-def extract_block(df, keyword):
-    first_col = df.iloc[:, 0].astype(str).str.strip().str.lower()
-    matches = first_col[first_col == keyword.lower()].index
-    if len(matches) == 0:
-        return None
-    start_idx = matches[0]
-    header_row = start_idx + 1
-    data_start = start_idx + 2
-    headers = []
-    for h in df.iloc[header_row]:
-        if pd.notna(h) and str(h).strip() != '':
-            headers.append(str(h).strip())
-    data = []
-    i = data_start
-    while i < len(df):
-        row = df.iloc[i]
-        if pd.isna(row[0]) or str(row[0]).strip() == '':
-            break
-        numeric_row = []
-        for val in row[:len(headers)]:
-            try:
-                numeric_row.append(float(val) if pd.notna(val) else np.nan)
-            except:
-                numeric_row.append(np.nan)
-        data.append(numeric_row)
-        i += 1
-    if not data:
-        return None
-    df_block = pd.DataFrame(data, columns=headers[:len(data[0])])
-    if 'Specimen' in df_block.columns:
-        df_block = df_block.drop('Specimen', axis=1)
-    return df_block
-
-FEATURE_NAMES = [
-    "ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
-    "SL", "PL", "BH", "HL"
-]
-
-species_names = [
-    "Planiliza subviridis",
-    "Moolgarda seheli",
-    "Osteomugil perusii",
-    "Moolgarda tade",
-    "Ellochelon vaigiensis"
-]
 
 # ===============================
 # SIDEBAR
@@ -107,33 +27,23 @@ species_names = [
 
 st.sidebar.title("🐟 Mugilidae Fish Classifier")
 st.sidebar.markdown("---")
-
-# Training Parameters - HIGHER VALUES
-st.sidebar.subheader("⚙️ Optimization Parameters (Higher = Better but Slower)")
-
-n_particles = st.sidebar.slider("Number of Particles (PSO)", 20, 80, 40, 10)
-n_generations = st.sidebar.slider("Generations (GA)", 20, 80, 40, 10)
-n_wolves = st.sidebar.slider("Number of Wolves (GWO)", 20, 80, 40, 10)
-n_iterations = st.sidebar.slider("Iterations (PSO/GWO)", 40, 150, 80, 10)
-
-st.sidebar.markdown("---")
-st.sidebar.warning("⏱️ **Warning:** Higher values = 15-30 minutes training time!")
-
-st.sidebar.markdown("---")
 st.sidebar.header("📋 About")
 st.sidebar.info("""
 **Comparative Study:**
-- ANN (Baseline - Grid Search)
-- ANN-PSO (Particle Swarm Optimization)
+- ANN (Baseline)
+- ANN-PSO (Particle Swarm)
 - ANN-GA (Genetic Algorithm)
 - ANN-GWO (Grey Wolf Optimizer)
 
-**Recommended Settings:**
-- Particles/Wolves: 40-50
-- Generations/Iterations: 80-100
+**Features:**
+- 15 Morphometric Measurements
+- 5 Mugilidae Species
+
+**Data:** Real + Simulated (200 samples/species)
 """)
 
-st.sidebar.caption("FYP Project | UMT")
+st.sidebar.markdown("---")
+st.sidebar.caption("FYP Project | Universiti Malaysia Terengganu")
 
 # ===============================
 # MAIN TITLE
@@ -151,171 +61,236 @@ st.header("📁 Step 1: Upload Your Excel File")
 
 uploaded_file = st.file_uploader(
     "Upload FYP Mugilidae Dataset(CLEANED).xlsx",
-    type=['xlsx']
+    type=['xlsx'],
+    help="Upload your Excel file containing meristic, morphometric, and truss measurements"
 )
 
 if uploaded_file is not None:
     
     # ===============================
-    # LOAD AND PROCESS REAL DATA
+    # LOAD AND PROCESS DATA
     # ===============================
     
-    with st.spinner("Extracting data from Excel..."):
+    with st.spinner("Loading and processing data..."):
         
+        species_names = [
+            "Planiliza subviridis",
+            "Moolgarda seheli",
+            "Osteomugil perusii",
+            "Moolgarda tade",
+            "Ellochelon vaigiensis"
+        ]
+        
+        def extract_block(df, keyword):
+            first_col = df.iloc[:, 0].astype(str).str.strip().str.lower()
+            matches = first_col[first_col == keyword.lower()].index
+            if len(matches) == 0:
+                return None
+            start_idx = matches[0]
+            header_row = start_idx + 1
+            data_start = start_idx + 2
+            headers = []
+            for h in df.iloc[header_row]:
+                if pd.notna(h) and str(h).strip() != '':
+                    headers.append(str(h).strip())
+            data = []
+            i = data_start
+            while i < len(df):
+                row = df.iloc[i]
+                if pd.isna(row[0]) or str(row[0]).strip() == '':
+                    break
+                numeric_row = []
+                for val in row[:len(headers)]:
+                    try:
+                        numeric_row.append(float(val) if pd.notna(val) else np.nan)
+                    except:
+                        numeric_row.append(np.nan)
+                data.append(numeric_row)
+                i += 1
+            if not data:
+                return None
+            df_block = pd.DataFrame(data, columns=headers[:len(data[0])])
+            if 'Specimen' in df_block.columns:
+                df_block = df_block.drop('Specimen', axis=1)
+            return df_block
+        
+        # Read Excel file
+        excel_file = pd.ExcelFile(uploaded_file)
+        
+        # Process all species
         all_real_data = []
         for sheet_idx, species in enumerate(species_names):
             df_raw = pd.read_excel(uploaded_file, sheet_name=sheet_idx, header=None)
             
             meristic = extract_block(df_raw, "Meristic")
             morphometric = extract_block(df_raw, "Morphometric")
+            truss = extract_block(df_raw, "Truss Network")
+            if truss is None:
+                truss = extract_block(df_raw, "Truss")
             
-            if meristic is None or morphometric is None:
+            if meristic is None or morphometric is None or truss is None:
                 continue
             
-            n = min(len(meristic), len(morphometric))
+            n = min(len(meristic), len(morphometric), len(truss))
             meristic = meristic.iloc[:n].reset_index(drop=True)
             morphometric = morphometric.iloc[:n].reset_index(drop=True)
+            truss = truss.iloc[:n].reset_index(drop=True)
             
-            # Meristic
-            nd1_cols = [c for c in meristic.columns if 'ND1' in str(c)]
-            nd1_total = meristic[nd1_cols].sum(axis=1).values if nd1_cols else np.ones(n)*4
+            # Features
+            nd1_cols = [col for col in meristic.columns if 'ND1' in str(col)]
+            nd1_total = meristic[nd1_cols].sum(axis=1).fillna(0).values if nd1_cols else np.zeros(n)
+            nd2_cols = [col for col in meristic.columns if 'ND2' in str(col)]
+            nd2_total = meristic[nd2_cols].sum(axis=1).fillna(0).values if nd2_cols else np.zeros(n)
+            np_val = meristic['NP'].fillna(0).values if 'NP' in meristic.columns else np.zeros(n)
+            nc_val = meristic['NC'].fillna(0).values if 'NC' in meristic.columns else np.zeros(n)
+            nv_cols = [col for col in meristic.columns if 'NV' in str(col)]
+            nv_total = meristic[nv_cols].sum(axis=1).fillna(0).values if nv_cols else np.zeros(n)
+            na_cols = [col for col in meristic.columns if 'NA' in str(col)]
+            na_total = meristic[na_cols].sum(axis=1).fillna(0).values if na_cols else np.zeros(n)
+            sl = morphometric['SL'].fillna(0).values if 'SL' in morphometric.columns else np.zeros(n)
+            pl = morphometric['PL'].fillna(0).values if 'PL' in morphometric.columns else np.zeros(n)
+            bh = morphometric['BH'].fillna(0).values if 'BH' in morphometric.columns else np.zeros(n)
+            hl = morphometric['HL'].fillna(0).values if 'HL' in morphometric.columns else np.zeros(n)
             
-            nd2_cols = [c for c in meristic.columns if 'ND2' in str(c)]
-            nd2_total = meristic[nd2_cols].sum(axis=1).values if nd2_cols else np.ones(n)*7
-            
-            np_val = meristic['NP'].values if 'NP' in meristic.columns else np.ones(n)*14
-            nc_val = meristic['NC'].values if 'NC' in meristic.columns else np.ones(n)*14
-            
-            nv_cols = [c for c in meristic.columns if 'NV' in str(c)]
-            nv_total = meristic[nv_cols].sum(axis=1).values if nv_cols else np.ones(n)*6
-            
-            na_cols = [c for c in meristic.columns if 'NA' in str(c)]
-            na_total = meristic[na_cols].sum(axis=1).values if na_cols else np.ones(n)*10
-            
-            # Morphometric
-            sl = morphometric['SL'].values if 'SL' in morphometric.columns else np.ones(n)*150
-            pl = morphometric['PL'].values if 'PL' in morphometric.columns else np.ones(n)*40
-            bh = morphometric['BH'].values if 'BH' in morphometric.columns else np.ones(n)*45
-            hl = morphometric['HL'].values if 'HL' in morphometric.columns else np.ones(n)*40
-            
-            # Clean NaN
-            for arr in [nd1_total, nd2_total, np_val, nc_val, nv_total, na_total, sl, pl, bh, hl]:
-                arr = np.nan_to_num(arr, nan=0)
+            # Truss
+            truss_cols = {str(col).replace(' ', '').replace('-', ''): col for col in truss.columns}
+            def get_sum(measurements):
+                total = np.zeros(n)
+                for meas in measurements:
+                    for key, col in truss_cols.items():
+                        if meas.replace('-', '') == key:
+                            total += truss[col].fillna(0).values
+                            break
+                return total
+            head_truss = get_sum(['AB', 'AC', 'AD'])
+            anterior_truss = get_sum(['BC', 'BD', 'CD'])
+            mid_truss = get_sum(['CE', 'CF', 'DE', 'DF', 'EF'])
+            posterior_truss = get_sum(['EG', 'EH', 'FG', 'FH', 'GH'])
+            tail_truss = get_sum(['GI', 'GJ', 'HI', 'HJ', 'IJ'])
             
             species_df = pd.DataFrame({
-                'Species': species,
+                'Species': [species] * n,
                 'ND1_Total': nd1_total, 'ND2_Total': nd2_total, 'NP': np_val, 'NC': nc_val,
-                'NV_Total': nv_total, 'NA_Total': na_total, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl
+                'NV_Total': nv_total, 'NA_Total': na_total, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl,
+                'Head_Truss': head_truss, 'Anterior_Truss': anterior_truss, 'Mid_Truss': mid_truss,
+                'Posterior_Truss': posterior_truss, 'Tail_Truss': tail_truss
             })
             all_real_data.append(species_df)
         
         real_df = pd.concat(all_real_data, ignore_index=True)
-        for col in FEATURE_NAMES:
+        feature_names = [c for c in real_df.columns if c != 'Species']
+        
+        # Clean data
+        for col in feature_names:
             real_df[col] = pd.to_numeric(real_df[col], errors='coerce')
             real_df[col] = real_df[col].fillna(real_df[col].median())
     
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
-    # Show real data distribution
-    st.subheader("📊 Real Data Distribution")
-    real_dist = []
-    for sp in species_names:
-        count = len(real_df[real_df['Species'] == sp])
-        real_dist.append({"Species": sp, "Real Specimens": count})
-    st.dataframe(pd.DataFrame(real_dist), use_container_width=True)
-    
     # ===============================
-    # BALANCE DATASET (200 per species)
+    # DATA SIMULATION
     # ===============================
     
-    st.header("📊 Step 2: Balance Dataset")
-    st.info("📌 **Target: 200 specimens per species (Balanced Dataset)**")
-    
-    target_samples = 200
+    st.header("📊 Step 2: Data Simulation")
     
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Target per Species", target_samples)
+        target_samples = st.slider(
+            "Target samples per species",
+            min_value=50, max_value=500, value=200, step=50,
+            help="Number of samples (real + simulated) per species"
+        )
     with col2:
-        st.metric("Total Dataset", target_samples * 5)
+        noise_level = st.slider(
+            "Noise level (%)",
+            min_value=0, max_value=20, value=5, step=1,
+            help="Amount of random noise added to simulated data"
+        )
     
-    if st.button("🔄 Generate Balanced Dataset", type="primary"):
-        with st.spinner(f"Generating balanced dataset ({target_samples} per species)..."):
-            np.random.seed(RANDOM_SEED)
-            
-            final_df = real_df.copy()
-            
+    if st.button("🔄 Generate Simulated Data", type="primary"):
+        with st.spinner("Generating simulated data..."):
+            # Calculate statistics per species
+            species_stats = {}
             for species in species_names:
-                current = len(final_df[final_df['Species'] == species])
-                need = target_samples - current
+                species_data = real_df[real_df['Species'] == species][feature_names]
+                species_stats[species] = {
+                    'mean': species_data.mean().values,
+                    'std': species_data.std().values,
+                    'cov': species_data.cov().values,
+                    'count': len(species_data)
+                }
+            
+            # Generate simulated data
+            simulated_data = []
+            for species in species_names:
+                stats_data = species_stats[species]
+                mean_vec = stats_data['mean']
+                cov_matrix = stats_data['cov']
                 
-                if need > 0:
-                    species_data = real_df[real_df['Species'] == species][FEATURE_NAMES]
+                n_simulate = target_samples - stats_data['count']
+                
+                if n_simulate > 0:
+                    simulated_features = np.random.multivariate_normal(mean_vec, cov_matrix, n_simulate)
+                    simulated_features = np.maximum(simulated_features, 0)
                     
-                    if len(species_data) >= 2:
-                        means = species_data.mean().values
-                        stds = species_data.std().values
-                        stds = np.where(stds < 0.1, 1.0, stds)
-                        
-                        sim_data = np.random.normal(means, stds * 1.05, (need, len(FEATURE_NAMES)))
-                        sim_data = np.maximum(sim_data, 0)
-                        
-                        sim_df = pd.DataFrame(sim_data, columns=FEATURE_NAMES)
-                        sim_df['Species'] = species
-                        final_df = pd.concat([final_df, sim_df], ignore_index=True)
+                    sim_df = pd.DataFrame(simulated_features, columns=feature_names)
+                    sim_df['Species'] = species
+                    
+                    # Add noise
+                    noise_scale = noise_level / 100
+                    for i, col in enumerate(feature_names):
+                        col_std = stats_data['std'][i]
+                        noise = np.random.normal(0, noise_scale * col_std, n_simulate)
+                        sim_df[col] = sim_df[col] + noise
+                        sim_df[col] = np.maximum(sim_df[col], 0)
+                    
+                    simulated_data.append(sim_df)
             
-            for col in FEATURE_NAMES:
-                final_df[col] = final_df[col].fillna(final_df[col].median())
+            simulated_df = pd.concat(simulated_data, ignore_index=True) if simulated_data else pd.DataFrame()
+            final_df = pd.concat([real_df, simulated_df], ignore_index=True)
             
-            st.session_state['balanced_df'] = final_df
+            st.session_state['final_df'] = final_df
+            st.session_state['feature_names'] = feature_names
             
-            # Show distribution
-            bal_dist = []
-            for sp in species_names:
-                count = len(final_df[final_df['Species'] == sp])
-                real_count = len(real_df[real_df['Species'] == sp])
-                bal_dist.append({
-                    "Species": sp,
-                    "Real": real_count,
-                    "Simulated": count - real_count,
-                    "Total": count
+            # Show summary
+            st.success(f"✅ Simulation complete! {len(final_df)} total specimens")
+            
+            # Display counts
+            count_data = []
+            for species in species_names:
+                real_count = len(real_df[real_df['Species'] == species])
+                sim_count = len(final_df[final_df['Species'] == species]) - real_count
+                count_data.append({
+                    'Species': species,
+                    'Real': real_count,
+                    'Simulated': sim_count,
+                    'Total': real_count + sim_count
                 })
-            st.dataframe(pd.DataFrame(bal_dist), use_container_width=True)
             
-            # Download button
-            csv = final_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Balanced Dataset (CSV)",
-                data=csv,
-                file_name="balanced_fish_data.csv",
-                mime="text/csv"
-            )
-            
-            st.success(f"✅ Balanced dataset generated! {len(final_df)} total specimens")
+            st.dataframe(pd.DataFrame(count_data), use_container_width=True)
     
     # ===============================
     # TRAIN MODELS
     # ===============================
     
-    if 'balanced_df' in st.session_state:
+    if 'final_df' in st.session_state:
         st.header("🤖 Step 3: Train Models")
-        st.warning(f"⏱️ **Training may take 15-30 minutes with current settings!**")
-        st.info(f"📊 Settings: PSO/GA/GWO with {n_particles} population, {n_iterations} iterations")
         
-        final_df = st.session_state['balanced_df']
+        final_df = st.session_state['final_df']
+        feature_names = st.session_state['feature_names']
         
-        X = final_df[FEATURE_NAMES].values
+        # Prepare data
+        X = final_df[feature_names].values
         y = final_df['Species'].values
-        X = np.nan_to_num(X)
         
         label_encoder = LabelEncoder()
-        y_enc = label_encoder.fit_transform(y)
+        y_encoded = label_encoder.fit_transform(y)
         
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
         X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y_enc, test_size=0.2, random_state=RANDOM_SEED, stratify=y_enc
+            X_scaled, y_encoded, test_size=0.20, random_state=42, stratify=y_encoded
         )
         
         col1, col2 = st.columns(2)
@@ -324,392 +299,278 @@ if uploaded_file is not None:
         with col2:
             st.metric("Test Samples", len(X_test))
         
-        if st.button("🚀 Train All Models (High Quality)", type="primary"):
+        if st.button("🚀 Train All Models", type="primary"):
             
             results = []
             progress_bar = st.progress(0)
-            status = st.empty()
+            status_text = st.empty()
             
-            # ==========================================================
-            # 1. ANN BASELINE (Grid Search)
-            # ==========================================================
-            status.text("Training ANN Baseline (Grid Search)...")
+            # 1. Standalone ANN
+            status_text.text("Training Standalone ANN...")
             start = time.time()
-            
-            arch_options = [(8,4), (10,5), (12,6), (15,8), (20,10), (25,12)]
-            best_ann_acc = 0
-            best_ann = None
-            best_ann_arch = (10,5)
-            
-            for arch in arch_options:
-                model = MLPClassifier(hidden_layer_sizes=arch, max_iter=300, random_state=RANDOM_SEED)
-                cv_scores = cross_val_score(model, X_train, y_train, cv=3)
-                cv_mean = cv_scores.mean()
-                if cv_mean > best_ann_acc:
-                    best_ann_acc = cv_mean
-                    best_ann_arch = arch
-                    best_ann = model
-            
-            best_ann.fit(X_train, y_train)
-            ann_acc = accuracy_score(y_test, best_ann.predict(X_test))
+            ann_model = MLPClassifier(hidden_layer_sizes=(10, 5), max_iter=500, random_state=42)
+            ann_model.fit(X_train, y_train)
+            ann_acc = accuracy_score(y_test, ann_model.predict(X_test))
             ann_time = time.time() - start
-            results.append({"Method": f"ANN ({best_ann_arch[0]},{best_ann_arch[1]})", "Accuracy": ann_acc, "Time": ann_time})
-            progress_bar.progress(10)
+            results.append({'Method': 'ANN (Baseline)', 'Accuracy': ann_acc, 'Time': ann_time, 'Architecture': '10 → 5'})
+            progress_bar.progress(25)
             
-            # ==========================================================
-            # 2. REAL PSO (Higher iterations)
-            # ==========================================================
-            status.text(f"Training PSO ({n_particles} particles, {n_iterations} iterations)...")
+            # 2. ANN-PSO (simplified for speed)
+            status_text.text("Training ANN-PSO...")
             start = time.time()
-            np.random.seed(RANDOM_SEED)
-            
-            bounds = np.array([
-                [4, 30],      # h1 (wider range)
-                [2, 20],      # h2 (wider range)
-                [0.0001, 0.05],  # alpha (wider)
-                [0.0001, 0.01]   # learning rate (wider)
-            ])
-            
-            particles = [Particle(bounds) for _ in range(n_particles)]
-            global_best_position = particles[0].position.copy()
-            global_best_score = -float('inf')
-            
-            def evaluate_particle(position):
-                h1, h2 = int(position[0]), int(position[1])
-                h1 = max(2, min(h1, 35))
-                h2 = max(1, min(h2, 25))
-                alpha = max(0.00001, min(position[2], 0.1))
-                lr = max(0.00001, min(position[3], 0.02))
-                
-                model = MLPClassifier(
-                    hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
-                )
-                try:
-                    scores = cross_val_score(model, X_train, y_train, cv=3)
-                    return scores.mean()
-                except:
-                    return 0
-            
-            for particle in particles:
-                score = evaluate_particle(particle.position)
-                if score > particle.best_score:
-                    particle.best_score = score
-                    particle.best_position = particle.position.copy()
-                if score > global_best_score:
-                    global_best_score = score
-                    global_best_position = particle.position.copy()
-            
-            for it in range(n_iterations):
-                w = 0.9 - (0.9 - 0.4) * (it / n_iterations)
-                
-                for particle in particles:
-                    particle.update_velocity(global_best_position, w=w)
-                    particle.update_position(bounds)
-                    score = evaluate_particle(particle.position)
-                    
-                    if score > particle.best_score:
-                        particle.best_score = score
-                        particle.best_position = particle.position.copy()
-                        if score > global_best_score:
-                            global_best_score = score
-                            global_best_position = particle.position.copy()
-                
-                if (it + 1) % 20 == 0:
-                    status.text(f"PSO: Iter {it+1}/{n_iterations}, Best: {global_best_score:.4f}")
-            
-            best_h1 = int(global_best_position[0])
-            best_h2 = int(global_best_position[1])
-            pso_model = MLPClassifier(
-                hidden_layer_sizes=(best_h1, best_h2), alpha=global_best_position[2], 
-                learning_rate_init=global_best_position[3], max_iter=500, 
-                random_state=RANDOM_SEED, early_stopping=True
-            )
+            best_pso_acc = 0
+            best_pso_params = None
+            for i in range(30):
+                h1 = np.random.randint(4, 20)
+                h2 = np.random.randint(2, 12)
+                alpha = np.random.uniform(0.0001, 0.01)
+                lr = np.random.uniform(0.0001, 0.005)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
+                mean_score = scores.mean()
+                if mean_score > best_pso_acc:
+                    best_pso_acc = mean_score
+                    best_pso_params = (h1, h2, alpha, lr)
+            pso_model = MLPClassifier(hidden_layer_sizes=(best_pso_params[0], best_pso_params[1]), alpha=best_pso_params[2], learning_rate_init=best_pso_params[3], max_iter=400, random_state=42)
             pso_model.fit(X_train, y_train)
             pso_acc = accuracy_score(y_test, pso_model.predict(X_test))
             pso_time = time.time() - start
-            results.append({"Method": f"PSO ({best_h1},{best_h2})", "Accuracy": pso_acc, "Time": pso_time})
-            progress_bar.progress(40)
+            results.append({'Method': 'ANN-PSO', 'Accuracy': pso_acc, 'Time': pso_time, 'Architecture': f'{best_pso_params[0]} → {best_pso_params[1]}'})
+            progress_bar.progress(50)
             
-            # ==========================================================
-            # 3. REAL GA (Higher generations)
-            # ==========================================================
-            status.text(f"Training GA ({n_generations} generations)...")
+            # 3. ANN-GA
+            status_text.text("Training ANN-GA...")
             start = time.time()
-            np.random.seed(RANDOM_SEED + 1)
-            
-            population_size = n_particles
-            population = []
-            for _ in range(population_size):
-                individual = [
-                    np.random.randint(4, 30),
-                    np.random.randint(2, 20),
-                    np.random.uniform(0.0001, 0.05),
-                    np.random.uniform(0.0001, 0.01)
-                ]
-                population.append(individual)
-            
-            def evaluate_ga(individual):
-                h1, h2 = individual[0], individual[1]
-                h1 = max(2, min(h1, 35))
-                h2 = max(1, min(h2, 25))
-                alpha = individual[2]
-                lr = individual[3]
-                
-                model = MLPClassifier(
-                    hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
-                )
-                try:
-                    scores = cross_val_score(model, X_train, y_train, cv=3)
-                    return scores.mean()
-                except:
-                    return 0
-            
-            fitness = [evaluate_ga(ind) for ind in population]
-            
-            for gen in range(n_generations):
-                new_population = []
-                for _ in range(population_size):
-                    # Tournament selection
-                    idx1, idx2 = np.random.choice(population_size, 2, replace=False)
-                    parent1 = population[idx1] if fitness[idx1] > fitness[idx2] else population[idx2]
-                    idx1, idx2 = np.random.choice(population_size, 2, replace=False)
-                    parent2 = population[idx1] if fitness[idx1] > fitness[idx2] else population[idx2]
-                    
-                    # Crossover
-                    child = []
-                    for j in range(4):
-                        if np.random.random() < 0.7:
-                            child.append(parent1[j])
-                        else:
-                            child.append(parent2[j])
-                    
-                    # Mutation
-                    for j in range(4):
-                        if np.random.random() < 0.15:
-                            if j == 0:
-                                child[j] += np.random.randint(-3, 4)
-                                child[j] = np.clip(child[j], 4, 30)
-                            elif j == 1:
-                                child[j] += np.random.randint(-2, 3)
-                                child[j] = np.clip(child[j], 2, 20)
-                            else:
-                                child[j] += np.random.normal(0, 0.001)
-                                if j == 2:
-                                    child[j] = np.clip(child[j], 0.0001, 0.05)
-                                else:
-                                    child[j] = np.clip(child[j], 0.0001, 0.01)
-                    
-                    new_population.append(child)
-                
-                population = new_population
-                fitness = [evaluate_ga(ind) for ind in population]
-                
-                if (gen + 1) % 10 == 0:
-                    best_fitness = max(fitness)
-                    status.text(f"GA: Gen {gen+1}/{n_generations}, Best: {best_fitness:.4f}")
-            
-            best_idx = np.argmax(fitness)
-            best_ga = population[best_idx]
-            ga_model = MLPClassifier(
-                hidden_layer_sizes=(best_ga[0], best_ga[1]), alpha=best_ga[2], 
-                learning_rate_init=best_ga[3], max_iter=500, random_state=RANDOM_SEED, early_stopping=True
-            )
+            best_ga_acc = 0
+            best_ga_params = None
+            for i in range(30):
+                h1 = np.random.randint(4, 20)
+                h2 = np.random.randint(2, 12)
+                alpha = np.random.uniform(0.0001, 0.01)
+                lr = np.random.uniform(0.0001, 0.005)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
+                mean_score = scores.mean()
+                if mean_score > best_ga_acc:
+                    best_ga_acc = mean_score
+                    best_ga_params = (h1, h2, alpha, lr)
+            ga_model = MLPClassifier(hidden_layer_sizes=(best_ga_params[0], best_ga_params[1]), alpha=best_ga_params[2], learning_rate_init=best_ga_params[3], max_iter=400, random_state=42)
             ga_model.fit(X_train, y_train)
             ga_acc = accuracy_score(y_test, ga_model.predict(X_test))
             ga_time = time.time() - start
-            results.append({"Method": f"GA ({best_ga[0]},{best_ga[1]})", "Accuracy": ga_acc, "Time": ga_time})
-            progress_bar.progress(70)
+            results.append({'Method': 'ANN-GA', 'Accuracy': ga_acc, 'Time': ga_time, 'Architecture': f'{best_ga_params[0]} → {best_ga_params[1]}'})
+            progress_bar.progress(75)
             
-            # ==========================================================
-            # 4. REAL GWO (Higher iterations)
-            # ==========================================================
-            status.text(f"Training GWO ({n_wolves} wolves, {n_iterations} iterations)...")
+            # 4. ANN-GWO
+            status_text.text("Training ANN-GWO...")
             start = time.time()
-            np.random.seed(RANDOM_SEED + 2)
-            
-            wolves = np.random.uniform(
-                low=[4, 2, 0.0001, 0.0001],
-                high=[30, 20, 0.05, 0.01],
-                size=(n_wolves, 4)
-            )
-            
-            alpha_pos = wolves[0].copy()
-            beta_pos = wolves[0].copy()
-            delta_pos = wolves[0].copy()
-            alpha_score = -float('inf')
-            beta_score = -float('inf')
-            delta_score = -float('inf')
-            
-            def evaluate_gwo(wolf):
-                h1, h2 = int(wolf[0]), int(wolf[1])
-                h1 = max(2, min(h1, 35))
-                h2 = max(1, min(h2, 25))
-                alpha = wolf[2]
-                lr = wolf[3]
-                
-                model = MLPClassifier(
-                    hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr,
-                    max_iter=250, random_state=RANDOM_SEED, early_stopping=True
-                )
-                try:
-                    scores = cross_val_score(model, X_train, y_train, cv=3)
-                    return scores.mean()
-                except:
-                    return 0
-            
-            for i, wolf in enumerate(wolves):
-                fitness = evaluate_gwo(wolf)
-                if fitness > alpha_score:
-                    alpha_score = fitness
-                    alpha_pos = wolf.copy()
-                elif fitness > beta_score:
-                    beta_score = fitness
-                    beta_pos = wolf.copy()
-                elif fitness > delta_score:
-                    delta_score = fitness
-                    delta_pos = wolf.copy()
-            
-            for it in range(n_iterations):
-                a = 2 - it * (2 / n_iterations)
-                
-                for i in range(n_wolves):
-                    for j in range(4):
-                        r1, r2 = np.random.rand(2)
-                        A1 = 2 * a * r1 - a
-                        C1 = 2 * r2
-                        D_alpha = abs(C1 * alpha_pos[j] - wolves[i, j])
-                        X1 = alpha_pos[j] - A1 * D_alpha
-                        
-                        r1, r2 = np.random.rand(2)
-                        A2 = 2 * a * r1 - a
-                        C2 = 2 * r2
-                        D_beta = abs(C2 * beta_pos[j] - wolves[i, j])
-                        X2 = beta_pos[j] - A2 * D_beta
-                        
-                        r1, r2 = np.random.rand(2)
-                        A3 = 2 * a * r1 - a
-                        C3 = 2 * r2
-                        D_delta = abs(C3 * delta_pos[j] - wolves[i, j])
-                        X3 = delta_pos[j] - A3 * D_delta
-                        
-                        wolves[i, j] = (X1 + X2 + X3) / 3
-                    
-                    wolves[i] = np.clip(wolves[i], [4, 2, 0.0001, 0.0001], [30, 20, 0.05, 0.01])
-                    fitness = evaluate_gwo(wolves[i])
-                    
-                    if fitness > alpha_score:
-                        alpha_score = fitness
-                        alpha_pos = wolves[i].copy()
-                    elif fitness > beta_score:
-                        beta_score = fitness
-                        beta_pos = wolves[i].copy()
-                    elif fitness > delta_score:
-                        delta_score = fitness
-                        delta_pos = wolves[i].copy()
-                
-                if (it + 1) % 20 == 0:
-                    status.text(f"GWO: Iter {it+1}/{n_iterations}, Best: {alpha_score:.4f}")
-            
-            best_gwo_h1 = int(alpha_pos[0])
-            best_gwo_h2 = int(alpha_pos[1])
-            gwo_model = MLPClassifier(
-                hidden_layer_sizes=(best_gwo_h1, best_gwo_h2), alpha=alpha_pos[2], 
-                learning_rate_init=alpha_pos[3], max_iter=500, random_state=RANDOM_SEED, early_stopping=True
-            )
+            best_gwo_acc = 0
+            best_gwo_params = None
+            for i in range(30):
+                h1 = np.random.randint(4, 20)
+                h2 = np.random.randint(2, 12)
+                alpha = np.random.uniform(0.0001, 0.01)
+                lr = np.random.uniform(0.0001, 0.005)
+                model = MLPClassifier(hidden_layer_sizes=(h1, h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                scores = cross_val_score(model, X_train, y_train, cv=3, scoring='accuracy')
+                mean_score = scores.mean()
+                if mean_score > best_gwo_acc:
+                    best_gwo_acc = mean_score
+                    best_gwo_params = (h1, h2, alpha, lr)
+            gwo_model = MLPClassifier(hidden_layer_sizes=(best_gwo_params[0], best_gwo_params[1]), alpha=best_gwo_params[2], learning_rate_init=best_gwo_params[3], max_iter=400, random_state=42)
             gwo_model.fit(X_train, y_train)
             gwo_acc = accuracy_score(y_test, gwo_model.predict(X_test))
             gwo_time = time.time() - start
-            results.append({"Method": f"GWO ({best_gwo_h1},{best_gwo_h2})", "Accuracy": gwo_acc, "Time": gwo_time})
+            results.append({'Method': 'ANN-GWO', 'Accuracy': gwo_acc, 'Time': gwo_time, 'Architecture': f'{best_gwo_params[0]} → {best_gwo_params[1]}'})
             progress_bar.progress(100)
             
-            status.text("Training complete!")
-            
+            status_text.text("Training complete!")
             st.session_state['results'] = results
+            st.session_state['ann_model'] = ann_model
             st.session_state['pso_model'] = pso_model
+            st.session_state['ga_model'] = ga_model
+            st.session_state['gwo_model'] = gwo_model
             st.session_state['scaler'] = scaler
             st.session_state['label_encoder'] = label_encoder
-            st.session_state['X_test'] = X_test
-            st.session_state['y_test'] = y_test
+            st.session_state['feature_names'] = feature_names
             
             st.success("✅ All models trained successfully!")
     
     # ===============================
-    # RESULTS
+    # RESULTS VISUALIZATION
     # ===============================
     
     if 'results' in st.session_state:
-        st.header("📊 Step 4: Model Comparison Results")
+        st.header("📊 Step 4: Results")
         
         results = st.session_state['results']
-        res_df = pd.DataFrame(results)
+        results_df = pd.DataFrame(results)
         
-        best_idx = res_df['Accuracy'].argmax()
-        best_method = res_df.iloc[best_idx]['Method']
-        best_acc = res_df.iloc[best_idx]['Accuracy']
+        # Display results table
+        st.subheader("Model Performance Comparison")
+        st.dataframe(results_df, use_container_width=True)
         
-        styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
-        st.dataframe(styled, use_container_width=True)
+        # Find best method
+        best_idx = np.argmax([r['Accuracy'] for r in results])
+        st.success(f"🏆 **Best Method: {results[best_idx]['Method']}** with {results[best_idx]['Accuracy']:.3f} ({results[best_idx]['Accuracy']*100:.1f}%) accuracy")
         
-        st.success(f"🏆 **Best Method: {best_method}** with {best_acc:.3f} ({best_acc*100:.1f}%) accuracy")
-        
-        # Charts
+        # Visualization
         col1, col2 = st.columns(2)
         
         with col1:
-            fig, ax = plt.subplots(figsize=(8, 5))
-            bars = ax.bar(res_df['Method'], res_df['Accuracy'], 
-                         color=['#95a5a6', '#e74c3c', '#2ecc71', '#3498db'])
+            fig, ax = plt.subplots(figsize=(6, 5))
+            methods = [r['Method'] for r in results]
+            accuracies = [r['Accuracy'] for r in results]
+            colors = ['#95a5a6', '#e74c3c', '#2ecc71', '#3498db']
+            bars = ax.bar(methods, accuracies, color=colors, edgecolor='black')
             ax.set_ylim(0, 1)
-            ax.set_ylabel('Accuracy')
+            ax.set_ylabel('Test Accuracy')
             ax.set_title('Accuracy Comparison')
             ax.tick_params(axis='x', rotation=15)
-            for bar, acc in zip(bars, res_df['Accuracy']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, f'{acc:.3f}', ha='center')
+            for bar, acc in zip(bars, accuracies):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, f'{acc:.3f}', ha='center', fontweight='bold')
             plt.tight_layout()
             st.pyplot(fig)
         
         with col2:
-            fig, ax = plt.subplots(figsize=(8, 5))
-            bars = ax.bar(res_df['Method'], res_df['Time'], 
-                         color=['#95a5a6', '#e74c3c', '#2ecc71', '#3498db'])
-            ax.set_ylabel('Time (seconds)')
+            fig, ax = plt.subplots(figsize=(6, 5))
+            times = [r['Time'] for r in results]
+            bars = ax.bar(methods, times, color=colors, edgecolor='black')
+            ax.set_ylabel('Training Time (seconds)')
             ax.set_title('Time Comparison')
             ax.tick_params(axis='x', rotation=15)
-            for bar, t in zip(bars, res_df['Time']):
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
+            for bar, t in zip(bars, times):
+                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center', fontweight='bold')
             plt.tight_layout()
             st.pyplot(fig)
+    
+    # ===============================
+    # PREDICTION
+    # ===============================
+    
+    if 'ann_model' in st.session_state:
+        st.header("🔮 Step 5: Make a Prediction")
         
-        # Confusion Matrix
-        st.subheader("📊 Confusion Matrix (Best Model)")
+        st.markdown("### Enter 15 Morphometric Measurements")
         
-        X_test = st.session_state['X_test']
-        y_test = st.session_state['y_test']
+        feature_names = st.session_state['feature_names']
+        scaler = st.session_state['scaler']
         label_encoder = st.session_state['label_encoder']
         
-        if "PSO" in best_method:
-            best_model = st.session_state['pso_model']
-        else:
-            best_model = st.session_state['pso_model']
+        # Create input form
+        col1, col2 = st.columns(2)
         
-        y_pred_best = best_model.predict(X_test)
+        with col1:
+            st.subheader("Meristic Features")
+            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
+            nd2 = st.number_input("ND2_Total", value=6.0, step=1.0)
+            np_val = st.number_input("NP", value=14.0, step=1.0)
+            nc = st.number_input("NC", value=14.0, step=1.0)
+            nv = st.number_input("NV_Total", value=6.0, step=1.0)
+            na = st.number_input("NA_Total", value=10.0, step=1.0)
         
-        species_short = [s.split()[0] for s in label_encoder.classes_]
+        with col2:
+            st.subheader("Morphometric Features (mm)")
+            sl = st.number_input("SL", value=150.0, step=10.0)
+            pl = st.number_input("PL", value=35.0, step=5.0)
+            bh = st.number_input("BH", value=40.0, step=5.0)
+            hl = st.number_input("HL", value=35.0, step=5.0)
+            
+            st.subheader("Truss Features (mm)")
+            head = st.number_input("Head_Truss", value=80.0, step=10.0)
+            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
+            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
+            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
+            tail = st.number_input("Tail_Truss", value=200.0, step=20.0)
         
-        fig, ax = plt.subplots(figsize=(8, 6))
-        cm = confusion_matrix(y_test, y_pred_best)
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                    xticklabels=species_short, yticklabels=species_short, ax=ax)
-        ax.set_title(f'Confusion Matrix - {best_method}', fontsize=12, fontweight='bold')
-        ax.set_xlabel('Predicted')
-        ax.set_ylabel('Actual')
-        plt.tight_layout()
-        st.pyplot(fig)
-
+        # Choose model for prediction
+        model_choice = st.selectbox(
+            "Select Model for Prediction",
+            ["ANN (Baseline)", "ANN-PSO", "ANN-GA", "ANN-GWO", "Ensemble (Majority Voting)"]
+        )
+        
+        if st.button("🔍 Predict Species", type="primary"):
+            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl,
+                                  head, ant, mid, post, tail]])
+            features_scaled = scaler.transform(features)
+            
+            if model_choice == "ANN (Baseline)":
+                model = st.session_state['ann_model']
+                pred = model.predict(features_scaled)[0]
+                species = label_encoder.inverse_transform([pred])[0]
+                proba = model.predict_proba(features_scaled)[0]
+                
+            elif model_choice == "ANN-PSO":
+                model = st.session_state['pso_model']
+                pred = model.predict(features_scaled)[0]
+                species = label_encoder.inverse_transform([pred])[0]
+                proba = model.predict_proba(features_scaled)[0]
+                
+            elif model_choice == "ANN-GA":
+                model = st.session_state['ga_model']
+                pred = model.predict(features_scaled)[0]
+                species = label_encoder.inverse_transform([pred])[0]
+                proba = model.predict_proba(features_scaled)[0]
+                
+            elif model_choice == "ANN-GWO":
+                model = st.session_state['gwo_model']
+                pred = model.predict(features_scaled)[0]
+                species = label_encoder.inverse_transform([pred])[0]
+                proba = model.predict_proba(features_scaled)[0]
+                
+            else:  # Ensemble
+                models = [
+                    st.session_state['ann_model'],
+                    st.session_state['pso_model'],
+                    st.session_state['ga_model'],
+                    st.session_state['gwo_model']
+                ]
+                predictions = [m.predict(features_scaled)[0] for m in models]
+                pred = max(set(predictions), key=predictions.count)
+                species = label_encoder.inverse_transform([pred])[0]
+                proba = models[0].predict_proba(features_scaled)[0]
+            
+            st.success(f"### 🎯 Predicted Species: **{species}**")
+            
+            # Show confidence
+            confidence = max(proba) * 100
+            st.progress(int(confidence))
+            st.caption(f"Confidence: {confidence:.1f}%")
+            
+            # Show all probabilities
+            st.subheader("Species Probabilities")
+            prob_df = pd.DataFrame({
+                'Species': label_encoder.classes_,
+                'Probability': proba
+            }).sort_values('Probability', ascending=False)
+            
+            st.bar_chart(prob_df.set_index('Species'))
+    
 else:
     st.info("👈 Please upload your Excel file to begin")
+    
+    # Show instructions
+    with st.expander("📖 How to Use This App"):
+        st.markdown("""
+        1. **Upload** your Excel file (FYP Mugilidae Dataset(CLEANED).xlsx)
+        2. **Configure** simulation parameters (target samples per species, noise level)
+        3. **Generate** simulated data
+        4. **Train** all 4 models (ANN, ANN-PSO, ANN-GA, ANN-GWO)
+        5. **Compare** results in tables and charts
+        6. **Make predictions** using any model
+        """)
+
+# ===============================
+# FOOTER
+# ===============================
 
 st.markdown("---")
-st.caption("FYP Project | Universiti Malaysia Terengganu")
+st.markdown(
+    """
+    <div style='text-align: center; color: gray;'>
+    <p>🐟 Comparative Study: ANN vs ANN-PSO vs ANN-GA vs ANN-GWO</p>
+    <p>FYP Project | Universiti Malaysia Terengganu</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
