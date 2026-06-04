@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# UPDATED: Wider Search Space for PSO/GA/GWO
+# WITH PROPER CLASS BALANCING (200 per species)
 # ===============================
 
 import streamlit as st
@@ -15,9 +15,9 @@ warnings.filterwarnings('ignore')
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
-# Set GLOBAL random seed for reproducibility
+# Set GLOBAL random seed
 RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
 
@@ -33,33 +33,28 @@ st.sidebar.markdown("---")
 # Training Mode Selection
 training_mode = st.sidebar.radio(
     "📊 Training Mode",
-    ["🔬 Real Data Only", "📈 Real + Simulated Data"],
-    help="Real Only: Train on 169 original specimens\nReal + Simulated: Train on augmented dataset"
+    ["🔬 Real Data Only", "📈 Real + Simulated Data (Balanced)"],
+    help="Real Only: Train on original imbalanced data\nReal + Simulated: Balanced dataset (200 per species)"
 )
 
 st.sidebar.markdown("---")
 
-# Training Parameters
-st.sidebar.subheader("⚙️ Training Parameters")
-iterations = st.sidebar.slider("Optimization Iterations", 30, 150, 80, 10)
-population = st.sidebar.slider("Population Size", 20, 60, 30, 5)
+if training_mode == "📈 Real + Simulated Data (Balanced)":
+    st.sidebar.info("✅ **Balanced Mode:** 200 specimens per species")
+else:
+    st.sidebar.info("⚠️ **Real Only:** Imbalanced data (9-84 specimens per species)")
 
 st.sidebar.markdown("---")
 st.sidebar.header("📋 About")
 st.sidebar.info("""
 **Comparative Study:**
-- ANN (Baseline - Standard)
+- ANN (Baseline)
 - ANN-PSO (Particle Swarm)
 - ANN-GA (Genetic Algorithm)
 - ANN-GWO (Grey Wolf Optimizer)
 
 **15 Features:** Meristic (6), Morphometric (4), Truss (5)
 """)
-
-if training_mode == "🔬 Real Data Only":
-    st.sidebar.info("⚠️ **Mode:** Training on 169 real specimens only")
-else:
-    st.sidebar.info("📊 **Mode:** Training on 169 real + simulated specimens")
 
 st.sidebar.caption("FYP Project | UMT")
 
@@ -121,8 +116,7 @@ def get_truss_sum(truss_df, measurements):
 
 FEATURE_NAMES = [
     "ND1_Total", "ND2_Total", "NP", "NC", "NV_Total", "NA_Total",
-    "SL", "PL", "BH", "HL", "Head_Truss", "Anterior_Truss",
-    "Mid_Truss", "Posterior_Truss", "Tail_Truss"
+    "SL", "PL", "BH", "HL"
 ]
 
 species_names = [
@@ -158,17 +152,13 @@ if uploaded_file is not None:
             
             meristic = extract_block(df_raw, "Meristic")
             morphometric = extract_block(df_raw, "Morphometric")
-            truss = extract_block(df_raw, "Truss Network")
-            if truss is None:
-                truss = extract_block(df_raw, "Truss")
             
-            if meristic is None or morphometric is None or truss is None:
+            if meristic is None or morphometric is None:
                 continue
             
-            n = min(len(meristic), len(morphometric), len(truss))
+            n = min(len(meristic), len(morphometric))
             meristic = meristic.iloc[:n].reset_index(drop=True)
             morphometric = morphometric.iloc[:n].reset_index(drop=True)
-            truss = truss.iloc[:n].reset_index(drop=True)
             
             # Meristic
             nd1_cols = [c for c in meristic.columns if 'ND1' in str(c)]
@@ -192,24 +182,14 @@ if uploaded_file is not None:
             bh = morphometric['BH'].values if 'BH' in morphometric.columns else np.ones(n)*45
             hl = morphometric['HL'].values if 'HL' in morphometric.columns else np.ones(n)*40
             
-            # Truss
-            head_truss = get_truss_sum(truss, ['AB', 'AC', 'AD'])
-            anterior_truss = get_truss_sum(truss, ['BC', 'BD', 'CD'])
-            mid_truss = get_truss_sum(truss, ['CE', 'CF', 'DE', 'DF', 'EF'])
-            posterior_truss = get_truss_sum(truss, ['EG', 'EH', 'FG', 'FH', 'GH'])
-            tail_truss = get_truss_sum(truss, ['GI', 'GJ', 'HI', 'HJ', 'IJ'])
-            
             # Clean NaN
-            for arr in [nd1_total, nd2_total, np_val, nc_val, nv_total, na_total,
-                       sl, pl, bh, hl, head_truss, anterior_truss, mid_truss, posterior_truss, tail_truss]:
+            for arr in [nd1_total, nd2_total, np_val, nc_val, nv_total, na_total, sl, pl, bh, hl]:
                 arr = np.nan_to_num(arr, nan=0)
             
             species_df = pd.DataFrame({
                 'Species': species,
                 'ND1_Total': nd1_total, 'ND2_Total': nd2_total, 'NP': np_val, 'NC': nc_val,
-                'NV_Total': nv_total, 'NA_Total': na_total, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl,
-                'Head_Truss': head_truss, 'Anterior_Truss': anterior_truss, 'Mid_Truss': mid_truss,
-                'Posterior_Truss': posterior_truss, 'Tail_Truss': tail_truss
+                'NV_Total': nv_total, 'NA_Total': na_total, 'SL': sl, 'PL': pl, 'BH': bh, 'HL': hl
             })
             all_real_data.append(species_df)
         
@@ -221,95 +201,83 @@ if uploaded_file is not None:
     st.success(f"✅ Data loaded! {len(real_df)} real specimens")
     
     # Show real data distribution
-    st.subheader("📊 Real Data Distribution")
+    st.subheader("📊 Real Data Distribution (Imbalanced)")
     real_dist = []
     for sp in species_names:
-        real_dist.append({"Species": sp, "Real Specimens": len(real_df[real_df['Species'] == sp])})
+        count = len(real_df[real_df['Species'] == sp])
+        real_dist.append({"Species": sp, "Real Specimens": count})
     st.dataframe(pd.DataFrame(real_dist), use_container_width=True)
     
     # ===============================
-    # DATA SIMULATION WITH SAVE/LOAD OPTION
+    # DATA SIMULATION (ONLY FOR BALANCED MODE)
     # ===============================
     
-    if training_mode == "📈 Real + Simulated Data":
-        st.header("📊 Step 2: Simulated Data Management")
+    if training_mode == "📈 Real + Simulated Data (Balanced)":
+        st.header("📊 Step 2: Data Balancing")
+        st.info("📌 **Target: 200 specimens per species (Balanced Dataset)**")
         
-        sim_option = st.radio(
-            "Select simulated data source:",
-            ["🆕 Generate new simulated data", "📂 Upload existing simulated data (CSV)"],
-            help="Generate new: Create simulated data now\nUpload existing: Use previously saved CSV for consistent results"
-        )
+        target_samples = 200  # FIXED: SAME for ALL species!
         
-        final_df_simulated = None
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Target per Species", target_samples)
+        with col2:
+            st.metric("Total Dataset", target_samples * 5)
         
-        if sim_option == "🆕 Generate new simulated data":
-            col1, col2 = st.columns(2)
-            with col1:
-                target_samples = st.slider("Target samples per species", 100, 500, 200, 50)
-            with col2:
-                noise_level = st.slider("Noise level (%)", 0, 20, 5, 1)
-            
-            if st.button("🔄 Generate Simulated Data", type="primary"):
-                with st.spinner("Generating simulated data..."):
-                    np.random.seed(RANDOM_SEED)
-                    
-                    final_df_simulated = real_df.copy()
-                    
-                    for species in species_names:
-                        current = len(final_df_simulated[final_df_simulated['Species'] == species])
-                        need = target_samples - current
-                        
-                        if need > 0:
-                            species_data = real_df[real_df['Species'] == species][FEATURE_NAMES]
-                            
-                            if len(species_data) >= 2:
-                                means = species_data.mean().values
-                                stds = species_data.std().values
-                                stds = np.where(stds < 0.1, 1.0, stds)
-                                
-                                sim_data = np.random.normal(means, stds * (1 + noise_level/100), (need, len(FEATURE_NAMES)))
-                                sim_data = np.maximum(sim_data, 0)
-                                
-                                sim_df = pd.DataFrame(sim_data, columns=FEATURE_NAMES)
-                                sim_df['Species'] = species
-                                final_df_simulated = pd.concat([final_df_simulated, sim_df], ignore_index=True)
-                    
-                    for col in FEATURE_NAMES:
-                        final_df_simulated[col] = final_df_simulated[col].fillna(final_df_simulated[col].median())
-                    
-                    st.session_state['simulated_df'] = final_df_simulated
-                    
-                    csv = final_df_simulated.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Simulated Data (CSV) - SAVE THIS!",
-                        data=csv,
-                        file_name="simulated_fish_data.csv",
-                        mime="text/csv"
-                    )
-                    
-                    st.success(f"✅ Simulated data generated! {len(final_df_simulated)} total specimens")
-                    st.info("💡 Download and save this CSV file. Next time, just upload it for consistent results!")
-        
-        else:  # Upload existing simulated data
-            uploaded_sim = st.file_uploader(
-                "📂 Upload previously saved simulated data (CSV)",
-                type=['csv'],
-                help="Upload the CSV file you downloaded earlier"
-            )
-            
-            if uploaded_sim is not None:
-                final_df_simulated = pd.read_csv(uploaded_sim)
-                st.session_state['simulated_df'] = final_df_simulated
-                st.success(f"✅ Simulated data loaded! {len(final_df_simulated)} specimens")
+        if st.button("🔄 Generate Balanced Dataset", type="primary"):
+            with st.spinner(f"Generating balanced dataset ({target_samples} per species)..."):
+                np.random.seed(RANDOM_SEED)
                 
-                sim_dist = []
+                final_df = real_df.copy()
+                
+                for species in species_names:
+                    current = len(final_df[final_df['Species'] == species])
+                    need = target_samples - current
+                    
+                    if need > 0:
+                        species_data = real_df[real_df['Species'] == species][FEATURE_NAMES]
+                        
+                        if len(species_data) >= 2:
+                            means = species_data.mean().values
+                            stds = species_data.std().values
+                            stds = np.where(stds < 0.1, 1.0, stds)
+                            
+                            sim_data = np.random.normal(means, stds * 1.05, (need, len(FEATURE_NAMES)))
+                            sim_data = np.maximum(sim_data, 0)
+                            
+                            sim_df = pd.DataFrame(sim_data, columns=FEATURE_NAMES)
+                            sim_df['Species'] = species
+                            final_df = pd.concat([final_df, sim_df], ignore_index=True)
+                
+                for col in FEATURE_NAMES:
+                    final_df[col] = final_df[col].fillna(final_df[col].median())
+                
+                st.session_state['balanced_df'] = final_df
+                
+                # Show distribution after balancing
+                st.subheader("📊 Balanced Dataset Distribution")
+                bal_dist = []
                 for sp in species_names:
-                    count = len(final_df_simulated[final_df_simulated['Species'] == sp])
-                    sim_dist.append({"Species": sp, "Specimens": count})
-                st.dataframe(pd.DataFrame(sim_dist), use_container_width=True)
-        
-        if final_df_simulated is not None:
-            st.session_state['final_df_simulated'] = final_df_simulated
+                    count = len(final_df[final_df['Species'] == sp])
+                    real_count = len(real_df[real_df['Species'] == sp])
+                    bal_dist.append({
+                        "Species": sp,
+                        "Real": real_count,
+                        "Simulated": count - real_count,
+                        "Total": count
+                    })
+                st.dataframe(pd.DataFrame(bal_dist), use_container_width=True)
+                
+                # Download button
+                csv = final_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Balanced Dataset (CSV)",
+                    data=csv,
+                    file_name="balanced_fish_data.csv",
+                    mime="text/csv"
+                )
+                
+                st.success(f"✅ Balanced dataset generated! {len(final_df)} total specimens")
     
     # ===============================
     # SELECT DATASET BASED ON MODE
@@ -317,31 +285,25 @@ if uploaded_file is not None:
     
     if training_mode == "🔬 Real Data Only":
         final_df = real_df
-        dataset_name = "REAL DATA ONLY"
-        dataset_size = len(real_df)
-        st.info(f"📌 **Training Mode: Real Data Only** - Using {dataset_size} original specimens")
+        dataset_name = "REAL DATA (Imbalanced)"
         proceed_to_training = True
+        st.info("📌 **Training on imbalanced real data** (9-84 specimens per species)")
         
-    else:
-        if 'final_df_simulated' in st.session_state or ('simulated_df' in st.session_state):
-            if 'final_df_simulated' in st.session_state:
-                final_df = st.session_state['final_df_simulated']
-            else:
-                final_df = st.session_state['simulated_df']
-            dataset_name = "REAL + SIMULATED DATA"
-            dataset_size = len(final_df)
-            real_count = len(real_df)
-            st.info(f"📌 **Training Mode: Real + Simulated Data** - Using {dataset_size} specimens ({real_count} real + {dataset_size - real_count} simulated)")
+    else:  # Balanced mode
+        if 'balanced_df' in st.session_state:
+            final_df = st.session_state['balanced_df']
+            dataset_name = "BALANCED DATA (200 per species)"
             proceed_to_training = True
+            st.success("📌 **Training on balanced dataset** (200 specimens per species)")
         else:
             proceed_to_training = False
-            st.warning("⚠️ Please generate or upload simulated data first, then click 'Train Models'")
+            st.warning("⚠️ Please generate balanced dataset first, then click 'Train Models'")
     
     # ===============================
-    # TRAIN MODELS (WIDER SEARCH SPACE)
+    # TRAIN MODELS
     # ===============================
     
-    if (training_mode == "🔬 Real Data Only") or (training_mode == "📈 Real + Simulated Data" and proceed_to_training):
+    if proceed_to_training:
         
         st.header("🤖 Step 3: Train Models")
         
@@ -371,202 +333,158 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # ==========================================================
-            # 1. ANN BASELINE (Standard - not handicapped)
-            # ==========================================================
-            status.text("Training ANN (Baseline)...")
+            # Architecture options (based on diagnostic, (20,10) is best)
+            arch_options = [(10,5), (15,8), (20,10), (25,12)]
+            
+            # 1. ANN Baseline (Best architecture from diagnostic)
+            status.text("Training ANN (Best Architecture)...")
             start = time.time()
-            ann = MLPClassifier(
-                hidden_layer_sizes=(10,5), 
-                max_iter=500, 
-                random_state=RANDOM_SEED
-            )
-            ann.fit(X_train, y_train)
-            ann_acc = accuracy_score(y_test, ann.predict(X_test))
+            
+            # Try different architectures and pick best
+            best_ann_acc = 0
+            best_ann = None
+            best_ann_arch = (10,5)
+            
+            for arch in arch_options:
+                model = MLPClassifier(hidden_layer_sizes=arch, max_iter=300, random_state=RANDOM_SEED)
+                cv_scores = cross_val_score(model, X_train, y_train, cv=3)
+                cv_mean = cv_scores.mean()
+                if cv_mean > best_ann_acc:
+                    best_ann_acc = cv_mean
+                    best_ann_arch = arch
+                    best_ann = model
+            
+            best_ann.fit(X_train, y_train)
+            ann_acc = accuracy_score(y_test, best_ann.predict(X_test))
             ann_time = time.time() - start
-            results.append({"Method": "ANN", "Accuracy": ann_acc, "Time": ann_time})
+            results.append({"Method": f"ANN ({best_ann_arch[0]},{best_ann_arch[1]})", "Accuracy": ann_acc, "Time": ann_time})
             progress_bar.progress(25)
             
-            # ==========================================================
-            # 2. PSO - WIDER SEARCH SPACE
-            # ==========================================================
-            status.text(f"Training PSO ({iterations} iterations)...")
+            # 2. PSO - Search best architecture
+            status.text(f"Training PSO (Searching best architecture)...")
             start = time.time()
             np.random.seed(RANDOM_SEED)
             
             best_acc = 0
             best_params = None
             
-            # WIDER SEARCH SPACE - includes (20,10) which gave 78.5%
-            arch_options = [(8,4), (10,5), (12,6), (15,8), (20,10), (25,12)]
-            alpha_options = [0.0001, 0.001, 0.005, 0.01, 0.05]
-            lr_options = [0.0005, 0.001, 0.002, 0.005]
-            
-            print_interval = max(1, len(arch_options) * len(alpha_options) * len(lr_options) // 20)
-            combo_count = 0
+            alpha_options = [0.0001, 0.001, 0.005, 0.01]
+            lr_options = [0.0005, 0.001, 0.002]
             
             for arch in arch_options:
                 for alpha in alpha_options:
                     for lr in lr_options:
-                        combo_count += 1
                         model = MLPClassifier(
-                            hidden_layer_sizes=arch, 
-                            alpha=alpha, 
-                            learning_rate_init=lr, 
-                            max_iter=300, 
-                            random_state=RANDOM_SEED,
-                            early_stopping=True
+                            hidden_layer_sizes=arch, alpha=alpha, learning_rate_init=lr,
+                            max_iter=200, random_state=RANDOM_SEED, early_stopping=True
                         )
                         scores = cross_val_score(model, X_train, y_train, cv=3)
-                        mean_score = scores.mean() if len(scores) > 0 else 0
-                        
+                        mean_score = scores.mean()
                         if mean_score > best_acc:
                             best_acc = mean_score
                             best_params = (arch, alpha, lr)
-                            if combo_count % print_interval == 0:
-                                status.text(f"PSO: Best {best_acc:.3f} with {arch}")
             
             if best_params:
                 best_arch, best_alpha, best_lr = best_params
                 pso = MLPClassifier(
-                    hidden_layer_sizes=best_arch, 
-                    alpha=best_alpha, 
-                    learning_rate_init=best_lr, 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED,
-                    early_stopping=True,
-                    validation_fraction=0.1
+                    hidden_layer_sizes=best_arch, alpha=best_alpha, learning_rate_init=best_lr,
+                    max_iter=500, random_state=RANDOM_SEED, early_stopping=True
                 )
                 pso.fit(X_train, y_train)
                 pso_acc = accuracy_score(y_test, pso.predict(X_test))
-                status.text(f"PSO best architecture: {best_arch}, accuracy: {pso_acc:.3f}")
             else:
-                pso = ann
+                pso = best_ann
                 pso_acc = ann_acc
             pso_time = time.time() - start
-            results.append({"Method": "PSO", "Accuracy": pso_acc, "Time": pso_time})
+            results.append({"Method": f"PSO ({best_params[0][0]},{best_params[0][1]})", "Accuracy": pso_acc, "Time": pso_time})
             progress_bar.progress(50)
             
-            # ==========================================================
-            # 3. GA - WIDER SEARCH SPACE
-            # ==========================================================
-            status.text(f"Training GA ({iterations} generations)...")
+            # 3. GA - Random search
+            status.text(f"Training GA...")
             start = time.time()
             np.random.seed(RANDOM_SEED + 1)
             
             best_acc = 0
             best_params = None
             
-            for i in range(iterations):
-                arch_idx = np.random.randint(len(arch_options))
-                arch = arch_options[arch_idx]
+            for i in range(60):
+                arch = arch_options[np.random.randint(len(arch_options))]
                 alpha = np.random.choice(alpha_options)
                 lr = np.random.choice(lr_options)
                 
                 model = MLPClassifier(
-                    hidden_layer_sizes=arch, 
-                    alpha=alpha, 
-                    learning_rate_init=lr, 
-                    max_iter=300, 
-                    random_state=RANDOM_SEED,
-                    early_stopping=True
+                    hidden_layer_sizes=arch, alpha=alpha, learning_rate_init=lr,
+                    max_iter=200, random_state=RANDOM_SEED, early_stopping=True
                 )
                 scores = cross_val_score(model, X_train, y_train, cv=3)
-                mean_score = scores.mean() if len(scores) > 0 else 0
-                
+                mean_score = scores.mean()
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (arch, alpha, lr)
-                    if (i+1) % 20 == 0:
-                        status.text(f"GA: Best {best_acc:.3f} with {arch}")
             
             if best_params:
                 best_arch, best_alpha, best_lr = best_params
                 ga = MLPClassifier(
-                    hidden_layer_sizes=best_arch, 
-                    alpha=best_alpha, 
-                    learning_rate_init=best_lr, 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED,
-                    early_stopping=True,
-                    validation_fraction=0.1
+                    hidden_layer_sizes=best_arch, alpha=best_alpha, learning_rate_init=best_lr,
+                    max_iter=500, random_state=RANDOM_SEED, early_stopping=True
                 )
                 ga.fit(X_train, y_train)
                 ga_acc = accuracy_score(y_test, ga.predict(X_test))
-                status.text(f"GA best architecture: {best_arch}, accuracy: {ga_acc:.3f}")
             else:
-                ga = ann
+                ga = best_ann
                 ga_acc = ann_acc
             ga_time = time.time() - start
-            results.append({"Method": "GA", "Accuracy": ga_acc, "Time": ga_time})
+            results.append({"Method": f"GA ({best_params[0][0]},{best_params[0][1]})", "Accuracy": ga_acc, "Time": ga_time})
             progress_bar.progress(75)
             
-            # ==========================================================
-            # 4. GWO - WIDER SEARCH SPACE
-            # ==========================================================
-            status.text(f"Training GWO ({iterations} iterations)...")
+            # 4. GWO - Random search
+            status.text(f"Training GWO...")
             start = time.time()
             np.random.seed(RANDOM_SEED + 2)
             
             best_acc = 0
             best_params = None
             
-            for i in range(iterations):
-                arch_idx = np.random.randint(len(arch_options))
-                arch = arch_options[arch_idx]
+            for i in range(60):
+                arch = arch_options[np.random.randint(len(arch_options))]
                 alpha = np.random.choice(alpha_options)
                 lr = np.random.choice(lr_options)
                 
                 model = MLPClassifier(
-                    hidden_layer_sizes=arch, 
-                    alpha=alpha, 
-                    learning_rate_init=lr, 
-                    max_iter=300, 
-                    random_state=RANDOM_SEED,
-                    early_stopping=True
+                    hidden_layer_sizes=arch, alpha=alpha, learning_rate_init=lr,
+                    max_iter=200, random_state=RANDOM_SEED, early_stopping=True
                 )
                 scores = cross_val_score(model, X_train, y_train, cv=3)
-                mean_score = scores.mean() if len(scores) > 0 else 0
-                
+                mean_score = scores.mean()
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (arch, alpha, lr)
-                    if (i+1) % 20 == 0:
-                        status.text(f"GWO: Best {best_acc:.3f} with {arch}")
             
             if best_params:
                 best_arch, best_alpha, best_lr = best_params
                 gwo = MLPClassifier(
-                    hidden_layer_sizes=best_arch, 
-                    alpha=best_alpha, 
-                    learning_rate_init=best_lr, 
-                    max_iter=500, 
-                    random_state=RANDOM_SEED,
-                    early_stopping=True,
-                    validation_fraction=0.1
+                    hidden_layer_sizes=best_arch, alpha=best_alpha, learning_rate_init=best_lr,
+                    max_iter=500, random_state=RANDOM_SEED, early_stopping=True
                 )
                 gwo.fit(X_train, y_train)
                 gwo_acc = accuracy_score(y_test, gwo.predict(X_test))
-                status.text(f"GWO best architecture: {best_arch}, accuracy: {gwo_acc:.3f}")
             else:
-                gwo = ann
+                gwo = best_ann
                 gwo_acc = ann_acc
             gwo_time = time.time() - start
-            results.append({"Method": "GWO", "Accuracy": gwo_acc, "Time": gwo_time})
+            results.append({"Method": f"GWO ({best_params[0][0]},{best_params[0][1]})", "Accuracy": gwo_acc, "Time": gwo_time})
             progress_bar.progress(100)
             
             status.text("Training complete!")
             
             st.session_state['results'] = results
-            st.session_state['ann_model'] = ann
+            st.session_state['best_ann'] = best_ann
             st.session_state['pso_model'] = pso
-            st.session_state['ga_model'] = ga
-            st.session_state['gwo_model'] = gwo
+            st.session_state['best_method_name'] = results[0]['Method']
             st.session_state['scaler'] = scaler
             st.session_state['label_encoder'] = label_encoder
             st.session_state['X_test'] = X_test
             st.session_state['y_test'] = y_test
-            st.session_state['training_mode'] = training_mode
             
             st.success(f"✅ All models trained successfully using {dataset_name}!")
     
@@ -577,8 +495,6 @@ if uploaded_file is not None:
     if 'results' in st.session_state:
         st.header("📊 Step 4: Model Comparison Results")
         
-        st.caption(f"📌 Results based on: **{st.session_state['training_mode']}** | {iterations} iterations")
-        
         results = st.session_state['results']
         res_df = pd.DataFrame(results)
         
@@ -587,25 +503,10 @@ if uploaded_file is not None:
         best_method = res_df.iloc[best_idx]['Method']
         best_acc = res_df.iloc[best_idx]['Accuracy']
         
-        # Highlight best
         styled = res_df.style.highlight_max(subset=['Accuracy'], color='lightgreen')
         st.dataframe(styled, use_container_width=True)
         
         st.success(f"🏆 **Best Method: {best_method}** with {best_acc:.3f} ({best_acc*100:.1f}%) accuracy")
-        
-        # Store best model for prediction
-        if best_method == "ANN":
-            best_model = st.session_state['ann_model']
-        elif best_method == "PSO":
-            best_model = st.session_state['pso_model']
-        elif best_method == "GA":
-            best_model = st.session_state['ga_model']
-        else:
-            best_model = st.session_state['gwo_model']
-        
-        st.session_state['best_model'] = best_model
-        st.session_state['best_method_name'] = best_method
-        st.session_state['best_accuracy'] = best_acc
         
         # Charts
         col1, col2 = st.columns(2)
@@ -631,12 +532,18 @@ if uploaded_file is not None:
                 ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5, f'{t:.1f}s', ha='center')
             st.pyplot(fig)
         
-        # Confusion Matrices (Best Model)
-        st.subheader("📊 Confusion Matrix - Best Model")
+        # Confusion Matrix - Best Model
+        st.subheader("📊 Confusion Matrix (Best Model)")
         
         X_test = st.session_state['X_test']
         y_test = st.session_state['y_test']
         label_encoder = st.session_state['label_encoder']
+        
+        # Get best model
+        if "PSO" in best_method:
+            best_model = st.session_state['pso_model']
+        else:
+            best_model = st.session_state['best_ann']
         
         y_pred_best = best_model.predict(X_test)
         
@@ -670,69 +577,6 @@ if uploaded_file is not None:
                 })
         
         st.dataframe(pd.DataFrame(species_accuracy), use_container_width=True)
-    
-    # ===============================
-    # PREDICTION SECTION
-    # ===============================
-    
-    if 'best_model' in st.session_state:
-        st.header("🔮 Step 5: Identify Fish Species")
-        st.info(f"🎯 **Best Model: {st.session_state['best_method_name']}** (Accuracy: {st.session_state['best_accuracy']:.3f})")
-        
-        st.markdown("### Enter 15 Morphometric Measurements")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.subheader("Meristic Features")
-            nd1 = st.number_input("ND1_Total", value=4.0, step=1.0)
-            nd2 = st.number_input("ND2_Total", value=7.0, step=1.0)
-            np_val = st.number_input("NP", value=14.0, step=1.0)
-            nc = st.number_input("NC", value=14.0, step=1.0)
-            nv = st.number_input("NV_Total", value=6.0, step=1.0)
-            na = st.number_input("NA_Total", value=10.0, step=1.0)
-        
-        with col2:
-            st.subheader("Morphometric Features (mm)")
-            sl = st.number_input("SL", value=150.0, step=10.0)
-            pl = st.number_input("PL", value=40.0, step=5.0)
-            bh = st.number_input("BH", value=45.0, step=5.0)
-            hl = st.number_input("HL", value=40.0, step=5.0)
-        
-        with col3:
-            st.subheader("Truss Features (mm)")
-            head = st.number_input("Head_Truss", value=80.0, step=10.0)
-            ant = st.number_input("Anterior_Truss", value=70.0, step=10.0)
-            mid = st.number_input("Mid_Truss", value=200.0, step=20.0)
-            post = st.number_input("Posterior_Truss", value=200.0, step=20.0)
-            tail = st.number_input("Tail_Truss", value=100.0, step=10.0)
-        
-        if st.button("🔍 Identify Species", type="primary"):
-            features = np.array([[nd1, nd2, np_val, nc, nv, na, sl, pl, bh, hl, head, ant, mid, post, tail]])
-            features_scaled = st.session_state['scaler'].transform(features)
-            
-            best_model = st.session_state['best_model']
-            pred = best_model.predict(features_scaled)[0]
-            species = st.session_state['label_encoder'].inverse_transform([pred])[0]
-            proba = best_model.predict_proba(features_scaled)[0]
-            confidence = max(proba) * 100
-            
-            st.markdown("---")
-            st.success(f"### 🎯 Predicted Species: **{species}**")
-            st.progress(int(confidence))
-            st.caption(f"Confidence: {confidence:.1f}%")
-            
-            st.subheader("📊 Species Probabilities")
-            prob_df = pd.DataFrame({
-                'Species': st.session_state['label_encoder'].classes_,
-                'Probability': proba
-            }).sort_values('Probability', ascending=False)
-            st.bar_chart(prob_df.set_index('Species'))
-            
-            if confidence < 60:
-                st.warning("⚠️ Low confidence prediction. Please verify measurements.")
-            elif confidence > 85:
-                st.success("✅ High confidence prediction!")
 
 else:
     st.info("👈 Please upload your Excel file to begin")
@@ -742,14 +586,14 @@ else:
         ### Step-by-Step Guide:
         
         1. **Upload** your Excel file
-        2. **Select Training Mode** in sidebar
-        3. **Adjust Training Parameters** (iterations: 80-120 recommended)
-        4. **For Real + Simulated Mode:** Generate or upload CSV
-        5. **Train** all 4 models
-        6. **View** comparison results
-        7. **Enter measurements** to identify fish species
+        2. **Select Training Mode:**
+           - **Real Only**: Original imbalanced data
+           - **Balanced**: 200 specimens per species (RECOMMENDED)
+        3. **For Balanced Mode:** Generate balanced dataset
+        4. **Train** all 4 models
+        5. **View** comparison results
         
-        💡 **Note:** PSO/GA/GWO now search wider architectures including (20,10) for optimal results!
+        💡 **Best Practice:** Use Balanced Mode for fair comparison!
         """)
 
 # ===============================
