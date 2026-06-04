@@ -1,6 +1,6 @@
 # ===============================
 # STREAMLIT APP - MUGILIDAE FISH CLASSIFIER
-# COMPLETE: 2 MODES + Save/Load Simulated Data
+# FIXED: Consistent Results with Same Simulated Data
 # ===============================
 
 import streamlit as st
@@ -16,6 +16,10 @@ from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
+
+# Set GLOBAL random seed for reproducibility
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
 
 st.set_page_config(page_title="Mugilidae Fish Classifier", page_icon="🐟", layout="wide")
 
@@ -220,7 +224,7 @@ if uploaded_file is not None:
     st.dataframe(pd.DataFrame(real_dist), use_container_width=True)
     
     # ===============================
-    # DATA SIMULATION WITH SAVE/LOAD OPTION (BARU!)
+    # DATA SIMULATION WITH SAVE/LOAD OPTION
     # ===============================
     
     if training_mode == "📈 Real + Simulated Data":
@@ -243,6 +247,9 @@ if uploaded_file is not None:
             
             if st.button("🔄 Generate Simulated Data", type="primary"):
                 with st.spinner("Generating simulated data..."):
+                    # Set random seed for reproducible simulation
+                    np.random.seed(RANDOM_SEED)
+                    
                     final_df_simulated = real_df.copy()
                     
                     for species in species_names:
@@ -331,10 +338,10 @@ if uploaded_file is not None:
             st.warning("⚠️ Please generate or upload simulated data first, then click 'Train Models'")
     
     # ===============================
-    # TRAIN MODELS
+    # TRAIN MODELS (WITH FIXED RANDOM SEEDS)
     # ===============================
     
-    if training_mode == "🔬 Real Data Only" or (training_mode == "📈 Real + Simulated Data" and proceed_to_training):
+    if (training_mode == "🔬 Real Data Only") or (training_mode == "📈 Real + Simulated Data" and proceed_to_training):
         
         st.header("🤖 Step 3: Train Models")
         
@@ -348,8 +355,9 @@ if uploaded_file is not None:
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
+        # FIXED: Use same random_state for consistent split
         X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y_enc, test_size=0.2, random_state=42, stratify=y_enc
+            X_scaled, y_enc, test_size=0.2, random_state=RANDOM_SEED, stratify=y_enc
         )
         
         col1, col2 = st.columns(2)
@@ -364,19 +372,21 @@ if uploaded_file is not None:
             progress_bar = st.progress(0)
             status = st.empty()
             
-            # 1. ANN
+            # 1. ANN (Fixed random_state)
             status.text("Training ANN...")
             start = time.time()
-            ann = MLPClassifier(hidden_layer_sizes=(10,5), max_iter=500, random_state=42)
+            ann = MLPClassifier(hidden_layer_sizes=(10,5), max_iter=500, random_state=RANDOM_SEED)
             ann.fit(X_train, y_train)
             ann_acc = accuracy_score(y_test, ann.predict(X_test))
             ann_time = time.time() - start
             results.append({"Method": "ANN", "Accuracy": ann_acc, "Time": ann_time})
             progress_bar.progress(25)
             
-            # 2. PSO
+            # 2. PSO with FIXED random seed
             status.text("Training PSO...")
             start = time.time()
+            np.random.seed(RANDOM_SEED)
+            
             best_acc = 0
             best_params = None
             for i in range(40):
@@ -384,14 +394,21 @@ if uploaded_file is not None:
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
+            
             if best_params:
-                pso = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), alpha=best_params[2], learning_rate_init=best_params[3], max_iter=500, random_state=42)
+                pso = MLPClassifier(
+                    hidden_layer_sizes=(best_params[0], best_params[1]), 
+                    alpha=best_params[2], 
+                    learning_rate_init=best_params[3], 
+                    max_iter=500, 
+                    random_state=RANDOM_SEED
+                )
                 pso.fit(X_train, y_train)
                 pso_acc = accuracy_score(y_test, pso.predict(X_test))
             else:
@@ -401,9 +418,11 @@ if uploaded_file is not None:
             results.append({"Method": "PSO", "Accuracy": pso_acc, "Time": pso_time})
             progress_bar.progress(50)
             
-            # 3. GA
+            # 3. GA with FIXED random seed
             status.text("Training GA...")
             start = time.time()
+            np.random.seed(RANDOM_SEED)
+            
             best_acc = 0
             best_params = None
             for i in range(40):
@@ -411,26 +430,35 @@ if uploaded_file is not None:
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
-                if best_params:
-                    ga = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), alpha=best_params[2], learning_rate_init=best_params[3], max_iter=500, random_state=42)
-                    ga.fit(X_train, y_train)
-                    ga_acc = accuracy_score(y_test, ga.predict(X_test))
-                else:
-                    ga = ann
-                    ga_acc = ann_acc
+            
+            if best_params:
+                ga = MLPClassifier(
+                    hidden_layer_sizes=(best_params[0], best_params[1]), 
+                    alpha=best_params[2], 
+                    learning_rate_init=best_params[3], 
+                    max_iter=500, 
+                    random_state=RANDOM_SEED
+                )
+                ga.fit(X_train, y_train)
+                ga_acc = accuracy_score(y_test, ga.predict(X_test))
+            else:
+                ga = ann
+                ga_acc = ann_acc
             ga_time = time.time() - start
             results.append({"Method": "GA", "Accuracy": ga_acc, "Time": ga_time})
             progress_bar.progress(75)
             
-            # 4. GWO
+            # 4. GWO with FIXED random seed
             status.text("Training GWO...")
             start = time.time()
+            np.random.seed(RANDOM_SEED)
+            
             best_acc = 0
             best_params = None
             for i in range(40):
@@ -438,14 +466,21 @@ if uploaded_file is not None:
                 h2 = np.random.randint(2, 15)
                 alpha = np.random.uniform(0.0001, 0.01)
                 lr = np.random.uniform(0.0001, 0.005)
-                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=42)
+                model = MLPClassifier(hidden_layer_sizes=(h1,h2), alpha=alpha, learning_rate_init=lr, max_iter=300, random_state=RANDOM_SEED)
                 scores = cross_val_score(model, X_train, y_train, cv=3)
                 mean_score = scores.mean() if len(scores) > 0 else 0
                 if mean_score > best_acc:
                     best_acc = mean_score
                     best_params = (h1, h2, alpha, lr)
+            
             if best_params:
-                gwo = MLPClassifier(hidden_layer_sizes=(best_params[0], best_params[1]), alpha=best_params[2], learning_rate_init=best_params[3], max_iter=500, random_state=42)
+                gwo = MLPClassifier(
+                    hidden_layer_sizes=(best_params[0], best_params[1]), 
+                    alpha=best_params[2], 
+                    learning_rate_init=best_params[3], 
+                    max_iter=500, 
+                    random_state=RANDOM_SEED
+                )
                 gwo.fit(X_train, y_train)
                 gwo_acc = accuracy_score(y_test, gwo.predict(X_test))
             else:
@@ -731,22 +766,14 @@ else:
         ### Step-by-Step Guide:
         
         1. **Upload** your Excel file
-        2. **Select Training Mode** in sidebar:
-           - **Real Data Only**: Train on 169 original specimens
-           - **Real + Simulated Data**: Train on augmented dataset
-        
+        2. **Select Training Mode** in sidebar
         3. **For Real + Simulated Mode:**
-           - Generate new simulated data OR
-           - Upload previously saved CSV (for consistent results!)
-           - Download and save the CSV for future use
-        
+           - Generate new simulated data OR upload existing CSV
+           - **Download and save the CSV for consistent results!**
         4. **Train** all 4 models
+        5. **View** results (consistent every time with same CSV!)
         
-        5. **View** comparison, confusion matrices, and per-species accuracy
-        
-        6. **Enter measurements** to identify fish species
-        
-        💡 **Tip:** Save your simulated data as CSV after first generation. Next time, just upload it to get consistent results!
+        💡 **Important:** Results will be consistent every time you use the SAME simulated data CSV file!
         """)
 
 # ===============================
